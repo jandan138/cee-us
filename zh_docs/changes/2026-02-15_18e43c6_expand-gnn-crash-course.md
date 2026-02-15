@@ -1,4 +1,4 @@
-# 2026-02-15 TMP expand-gnn-crash-course
+# 2026-02-15 18e43c6 expand-gnn-crash-course
 
 ## 背景
 
