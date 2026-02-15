@@ -10,11 +10,13 @@
 ## 阅读顺序（建议）
 
 1. 01_gnn_crash_course.md：GNN 最小必要知识（不讲花活）
+  - 如果你对“聚合/为什么要 mean/sum”没概念，先看：07_aggregation_demystified.md
 2. 02_object_centric_dynamics_in_cee-us.md：为什么本项目需要 GNN；观测如何拆成“agent + objects”
 3. 03_code_walkthrough_graphneuralnetwork.md：看懂核心网络 GraphNeuralNetwork（单模型版）
 4. 04_code_walkthrough_gnn_forward_model_training.md：看懂 GNNForwardModel（预处理/归一化/损失/训练）
 5. 05_ensemble_parallel_gnn.md：看懂并行 ensemble 版（更贴近论文/实验）
 6. 06_how_to_run_and_tune_gnn_experiments.md：怎么跑、怎么改超参、常见坑怎么排
+7. 07_aggregation_demystified.md：把“聚合”讲到完全不懵（为什么需要、怎么实现、怎么选 mean/sum）
 
 ## 关键代码索引
 
