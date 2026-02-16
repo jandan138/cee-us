@@ -17,6 +17,7 @@
 5. 05_ensemble_parallel_gnn.md：看懂并行 ensemble 版（更贴近论文/实验）
 6. 06_how_to_run_and_tune_gnn_experiments.md：怎么跑、怎么改超参、常见坑怎么排
 7. 07_aggregation_demystified.md：把“聚合”讲到完全不懵（为什么需要、怎么实现、怎么选 mean/sum）
+8. 08_segment_sum_mean_scatter_explained.md：把 `segment_sum/mean` / `scatter_add` 讲到能自己写出来（含最小可运行例子）
 
 ## 关键代码索引
 
