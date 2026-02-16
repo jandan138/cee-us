@@ -1,8 +1,25 @@
 [flake8]
+# 说明：下面这些规则用于“静态代码检查”。
+# 你可以把 flake8 理解成“代码语法和风格体检器”。
+# 运行方式示例：flake8 mbrl experiments
+
+# ignore：明确忽略哪些错误码。
+# 这里忽略了行过长(E501)等一些常见项，目的是减少历史代码迁移成本。
 ignore = C901, E203, E266, E501, W503, F403, F401, E741, E231
+
+# 单行最大长度（字符数）。
+# 这里和 black 的 120 保持一致，避免工具打架。
 max-line-length = 120
+
+# 允许函数复杂度上限（圈复杂度）。
+# 数字越大，允许函数逻辑越复杂；建议新代码尽量保持更低。
 max-complexity = 18
+
+# select：只启用这些大类规则。
+# B/B9 来自 bugbear（更偏“潜在 bug 提示”），E/W/F 是 pycodestyle/pyflakes 常见规则。
 select = B,C,E,F,W,T4,B9
+
+# 只检查这两个目录下的 Python 文件。
 filename =
     ./mbrl/**/*.py,
     ./experiments/**/*.py,

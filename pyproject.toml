@@ -1,10 +1,15 @@
 [build-system]
+# 使用 setuptools + wheel 作为构建后端。
+# 这是 Python 项目现代打包入口配置（PEP 517/518）。
 requires = ["setuptools", "wheel"]
 build-backend = "setuptools.build_meta:__legacy__"
 
 [tool.black]
+# black 的单行长度限制，和 .flake8 保持一致。
 line-length = 120
+# 本项目主要目标版本是 Python 3.8。
 target-version = ['py38']
+# 仅格式化 mbrl 与 experiments 下的 .py/.pyi 文件。
 include = '''
     .*mbrl/.*\.pyi?$
     | .*experiments/.*\.pyi?$

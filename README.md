@@ -1,5 +1,35 @@
 # Curious Exploration via Structured World Models Yields Zero-Shot Object Manipulation
 
+## 中文快速导读（Python 新手版）
+
+如果你是第一次接触这个项目，可以先按下面顺序理解：
+
+1. 先看“这是什么”
+  - 这是一个基于世界模型（World Model）的强化学习项目，目标是先进行“好奇探索”，再在下游任务上做零样本泛化。
+
+2. 再看“怎么安装”
+  - 推荐 Python 3.8 + 虚拟环境。
+  - 如果你要跑完整环境（construction/playground/robodesk），通常需要 MuJoCo。
+  - 如果先做代码阅读或离线分析，可以先安装不含 MuJoCo 的依赖（见 requirements.no_mujoco.txt）。
+
+3. 再看“怎么运行”
+  - 主入口是 mbrl/main.py。
+  - 运行时必须给一个 YAML 配置文件（位于 experiments/cee_us/settings）。
+  - 你可以把 YAML 理解成“实验配方”：环境、模型、控制器、训练轮数都写在里面。
+
+4. 再看“输出在哪里”
+  - 日志与指标会写到 working_dir（由配置控制），可用 TensorBoard 查看。
+
+5. 常见新手坑
+  - Python 版本不匹配（建议按文档使用 3.8）。
+  - MuJoCo 环境变量没配好。
+  - 配置文件里需要你手动填写已训练模型路径（做 zero-shot 时尤其常见）。
+
+如果你只想先跑通一次：
+- 先按 Installation 安装；
+- 再复制 How to run 的示例命令直接运行；
+- 成功后再改 YAML 做自己的实验。
+
 <p align="center">
 <img src="docs/images/cee_us_summary.gif" width="500"/>
 </p>

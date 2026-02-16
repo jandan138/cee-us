@@ -1,17 +1,26 @@
+# 这是 pre-commit 的配置文件。
+# 作用：在你执行 git commit 前，自动帮你做代码格式化和基础检查。
+# 新手建议：先执行一次 `pre-commit install`，之后每次提交都会自动运行这些检查。
+
 repos:
+  # Black：代码格式化工具（自动统一代码样式）
   - repo: https://github.com/psf/black
     rev: 22.12.0
     hooks:
       - id: black
+        # 指定使用 Python 3.8 解释器执行该 hook
         language_version: python3.8
 
+  # flake8：静态检查工具（找潜在错误和风格问题）
   - repo: https://github.com/pycqa/flake8
     rev: 3.9.2
     hooks:
       - id: flake8
 
+  # isort：自动整理 import 顺序
   - repo: https://github.com/pycqa/isort
     rev: 5.10.1
     hooks:
       - id: isort
+        # 让 isort 的排序风格与 black 保持兼容，避免相互改动
         args: ["--profile", "black"]

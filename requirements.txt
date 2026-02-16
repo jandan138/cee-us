@@ -1,19 +1,41 @@
+# 依赖清单（含 MuJoCo 版本）
+# 使用方式：pip install -r requirements.txt
+
+# Gym 经典强化学习环境接口
 gym==0.17.2
+# MuJoCo Python 接口（本项目环境依赖）
 mujoco-py==2.0.2.0
+# 配置系统 smart-settings（从指定 commit 安装，保证配置行为可复现）
 -e git+https://github.com/martius-lab/smart-settings@85e42b2eff23c3ea1ddc544e8a1784841da64735#egg=smart_settings
+# 数值计算基础库
 numpy==1.23.5
+# 进度条显示
 tqdm==4.64.1
+# 轻量委托/转发工具
 forwardable==0.4.1
+# 机器学习工具（数据划分、评估等）
 scikit-learn==1.2.0
+# 科学计算库
 scipy==1.9.3
+# 绘图库
 matplotlib==3.6.2
+# 提交前自动检查框架
 pre-commit==2.20.0
+# 代码格式化工具
 black==22.12.0
+# HDF5 数据存储
 h5py==3.7.0
+# Git 操作库（读取仓库信息等）
 GitPython==3.1.29
+# TensorBoardX 记录可视化指标
 tensorboardX==2.5.1
+# TensorBoard 主程序
 tensorboard==2.11.0
+# Notebook 环境
 jupyter==1.0.0
+# 图像读写
 imageio==2.22.4
+# 视频编码支持（配合 imageio）
 imageio-ffmpeg==0.4.7
+# 统计可视化
 seaborn==0.12.1

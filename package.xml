@@ -1,16 +1,26 @@
 <?xml version="1.0"?>
+<!--
+  这是 ROS/ament 生态使用的包元信息文件。
+  作用类似 Python 世界里的 setup.py/pyproject.toml 元数据。
+-->
 <package format="2">
+  <!-- 包名 -->
   <name>mbrl</name>
+  <!-- 包版本 -->
   <version>1.0.0</version>
+  <!-- 简短描述 -->
   <description>
       AL: MBRL
   </description>
 
+  <!-- 维护者信息 -->
   <maintainer email="csancaktar@tuebingen.mpg.de">Sebastian Blaes</maintainer>
 
+  <!-- 声明许可证类型（注意应与根目录 LICENSE 保持一致） -->
   <license>BSD 3-clause</license>
 
   <export>
+    <!-- 指定构建类型：ament_python -->
     <build_type>ament_python</build_type>
   </export>
 </package>

@@ -1,0 +1,10 @@
+# uv 依赖锁文件（lock file）
+# 作用：把解析出来的依赖版本固定下来，保证多人/多机器安装结果一致。
+# 注意：本项目 .gitignore 当前默认忽略 uv.lock，表示团队暂不强制提交它。
+
+# lock 文件格式版本
+version = 1
+# lock 文件修订号（由 uv 工具维护）
+revision = 3
+# 当前锁定环境要求的 Python 版本范围
+requires-python = ">=3.8"
