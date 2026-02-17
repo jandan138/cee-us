@@ -2,6 +2,20 @@
 
 目标：你能从 settings 出发，跑一个 GNN/Ensemble GNN 实验，并知道改哪些 key 会影响什么。
 
+## 与论文主线的对应：两阶段（intrinsic free-play → extrinsic zero-shot）如何落在 settings 上
+
+论文的叙事主线是：
+
+- **Intrinsic 阶段**：用 curiosity 驱动的 planning，在 structured world model 里规划“未来新奇”，得到高交互的 free-play 数据
+- **Extrinsic 阶段**：用同一个学到的 world model，在下游任务上做 model-based planning，实现 zero-shot
+
+在这个仓库里，这两段通常分别体现在 settings 路径/命名上（例如 `curious_exploration/` vs `zero_shot_generalization/`）。
+
+所以这篇“怎么跑/怎么调参”本质上是在教你：
+
+- 如何复现实验中“训练 world model + 用 world model 做规划”的 pipeline
+- 哪些超参会直接影响 world model 的表达能力与泛化，从而影响论文关心的 zero-shot 效果
+
 ## 1. 从 settings 选一个 GNN 实验
 
 常见入口在：

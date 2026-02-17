@@ -2,6 +2,20 @@
 
 这一篇回答：**本项目的 GNN 到底在预测什么？输入输出如何对应环境？**
 
+## 与论文主线的对应：对象中心表示是“结构化世界模型”的第一步
+
+论文强调“结构化世界模型（structured world models）”的动机之一是：多物体操控里，关键信息主要来自稀疏的 **agent-object** 与 **object-object** 交互。
+
+要让世界模型捕捉这种交互，第一步就是把观测拆成：
+
+- agent（中心/全局）状态
+- 一组 objects（每个 object 一个节点），并允许它们通过边交互
+
+这篇文档讲的“观测怎么拆成 agent+objects”就是把论文里的 world model 设计落到工程实现的入口：
+
+- 你拆出来的这三块输入，后面会被送进 `GNNForwardModel` / `GNNForwardEnsembleModel` 作为世界模型的输入
+- 世界模型学会之后，MPC/planning 才能在“想象空间”里滚动预测未来，做论文里的 curiosity free-play 与下游 zero-shot 规划
+
 ## 1. 本项目的 GNN 是“动力学模型（forward model）”
 
 在 model-based RL / MPC 里，你会需要一个模型：

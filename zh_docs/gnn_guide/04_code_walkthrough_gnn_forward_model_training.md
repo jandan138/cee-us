@@ -7,6 +7,16 @@
 - 归一化器怎么更新、什么时候更新
 - loss 是怎么计算的
 
+## 与论文主线的对应：这是“学 world model”的训练工程化落地
+
+论文里讲“structured world model”听起来像一个高层概念，但最终必须落到：
+
+- 从真实环境 rollout 收集数据（$o_t, a_t, o_{t+1}$）
+- 用监督学习训练动力学模型（世界模型）去预测下一步
+- 让这个模型足够稳定/可泛化，才能在 MPC/planning 里做多步 rollout（用于 curiosity free-play 或下游 zero-shot）
+
+这篇文档解释的这些工程细节（`target_is_delta`、输入/输出归一化、如何构造训练 batch、MSE loss）就是把“世界模型可训练、可用于规划”这件事落到代码层面。
+
 ## 1. GNNForwardModel 在项目中的位置
 
 它实现了一个 forward model（动力学模型）。

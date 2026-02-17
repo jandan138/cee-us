@@ -11,6 +11,15 @@
 
 本项目里 GNN 主要用于**动力学模型（forward model）**：输入 $(o_t, a_t)$，预测 $o_{t+1}$ 或者变化量 $\Delta o$。
 
+## 与论文主线的对应：为什么这算“Structured World Model”
+
+这篇讲的是“通用 GNN 概念”，但它在论文主线里的位置非常明确：
+
+- 论文的核心不是“再训练一个更强的 policy”，而是先学一个**结构化世界模型（structured world model）**。
+- 这里的“结构化”具体体现为：用图结构（objects=nodes, interactions=edges）来表达环境动力学，而不是把所有东西拼成一个大向量丢进 MLP。
+- 这样做的直接收益是**组合泛化（combinatorial generalization）**：对象数量/排列变化时，世界模型仍然能工作，从而支持论文展示的 zero-shot 下游任务。
+- 后续所有概念（message passing、聚合、global/context）都是为了让这个“对象中心的动力学世界模型”可训练、可泛化、可放进 MPC/planning 里滚动预测。
+
 ---
 
 ## 0. 一个最直观的比喻：群聊

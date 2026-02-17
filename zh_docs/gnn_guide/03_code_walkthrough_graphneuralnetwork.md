@@ -2,6 +2,21 @@
 
 目标：读完这一篇，你能看懂 mbrl/models/torch_models/gnn_modules.py 里的 `GraphNeuralNetwork`，并能在脑子里跑一遍 forward。
 
+## 与论文主线的对应：这就是“structured world model”的动力学网络
+
+在论文叙事里，“world model”不是抽象名词，它落到代码里就是一个可滚动预测的动力学网络：
+
+- 输入：`agent_state`（中心/全局）+ 一组 objects（节点）+ `action`
+- 输出：下一步（或增量）`agent_state` 与 objects 的动态量
+
+`GraphNeuralNetwork` 之所以体现“structured”，是因为它显式分了三类计算：
+
+- object-object 交互（`edge_mlp`）
+- object 动力学更新（`node_mlp`）
+- agent（中心节点）更新（`global_mlp`，以及可选的 agent-object 分支）
+
+理解它，你就能把“论文里结构化世界模型”与“工程实现的前向传播”对上。
+
 ## 1. 总体结构：三块 MLP
 
 `GraphNeuralNetwork` 里最关键的是三套 MLP：

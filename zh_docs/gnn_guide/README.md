@@ -7,6 +7,13 @@
 
 本导读默认你会：Python、PyTorch 基础张量操作；不要求你有 GNN 经验。
 
+补充说明：本导读会尽量在每篇开头加一小段“与论文 Structured World Model 主线的对应”，帮助你把：
+
+- 论文里的 world model / planning 叙事
+- 与本仓库里的具体类（`GNNForwardModel` / `GraphNeuralNetwork` 等）
+
+对齐起来。
+
 ## 阅读顺序（建议）
 
 1. 01_gnn_crash_course.md：GNN 最小必要知识（不讲花活）

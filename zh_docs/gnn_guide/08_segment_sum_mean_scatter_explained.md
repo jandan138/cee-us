@@ -11,6 +11,21 @@
 
 读完目标：你至少能手算一个小例子，并看懂代码里为什么要 `index_add_ / scatter_add`。
 
+## 与论文主线的对应：这是让 structured world model “能高效训练/能在 MPC 里 rollout” 的实现细节
+
+论文关心的是：把 structured world model 放进 planning/MPC 里做多步预测。
+
+要实现这一点，工程上必须解决两个现实问题：
+
+- 一个 batch 里有很多张“对象图”（B 个样本），不能写成 Python for 循环慢慢聚合
+- GNN 的核心操作“把边消息聚合回节点”必须用高效的张量操作实现（否则 rollout 多步会很慢）
+
+`segment_sum/mean` / `scatter_add` 就是把这一步变成“可并行的张量分桶汇总”。
+
+所以你在这里看到的内容虽然偏实现，但它支撑的是论文里那句很关键的话：
+
+> 我们在 world model 里做 planning/rollout，而不是只把模型当成一个奖励计算器。
+
 ---
 
 ## 0. 先统一词汇：你现在看到的每个词到底是什么意思
