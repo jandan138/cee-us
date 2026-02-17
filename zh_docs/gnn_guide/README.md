@@ -18,6 +18,7 @@
 6. 06_how_to_run_and_tune_gnn_experiments.md：怎么跑、怎么改超参、常见坑怎么排
 7. 07_aggregation_demystified.md：把“聚合”讲到完全不懵（为什么需要、怎么实现、怎么选 mean/sum）
 8. 08_segment_sum_mean_scatter_explained.md：把 `segment_sum/mean` / `scatter_add` 讲到能自己写出来（含最小可运行例子）
+9. 09_global_context_agent_action_in_world_model.md：从论文 world model 主线解释为什么必须输入 agent state + action、以及代码里对应哪条分支
 
 ## 关键代码索引
 
