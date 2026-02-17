@@ -16,6 +16,26 @@
 - 如何复现实验中“训练 world model + 用 world model 做规划”的 pipeline
 - 哪些超参会直接影响 world model 的表达能力与泛化，从而影响论文关心的 zero-shot 效果
 
+### 最短路径：分别跑一条 intrinsic 和一条 extrinsic
+
+如果你想“按论文两阶段”快速建立直觉，可以先各跑一个：
+
+- Intrinsic/free-play（curious exploration）：
+  - `experiments/cee_us/settings/construction/curious_exploration/gnn_ensemble_cee_us.yaml`
+  - `experiments/cee_us/settings/playground/curious_exploration/gnn_ensemble_cee_us.yaml`
+- Extrinsic/zero-shot（downstream tasks）：
+  - `experiments/cee_us/settings/construction/zero_shot_generalization/gnn_ensemble_cee_us_zero_shot_stack.yaml`
+  - `experiments/cee_us/settings/playground/zero_shot_generalization/gnn_ensemble_cee_us_zero_shot_push4.yaml`
+
+它们都用同一个入口命令：
+
+- `python -m mbrl.main <settings.yaml>`
+
+区别主要在 settings 中：
+
+- 是否处在 curious exploration（以 intrinsic 目标驱动采样/训练）
+- 是否处在 zero-shot generalization（加载训练好的 world model 直接规划）
+
 ## 1. 从 settings 选一个 GNN 实验
 
 常见入口在：

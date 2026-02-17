@@ -17,6 +17,20 @@
 
 这篇文档解释的这些工程细节（`target_is_delta`、输入/输出归一化、如何构造训练 batch、MSE loss）就是把“世界模型可训练、可用于规划”这件事落到代码层面。
 
+### 论文两阶段里“world model 学习”在哪发生
+
+把论文流程翻译成仓库动作，大致是：
+
+1) 在 **Intrinsic/free-play** settings 下跑训练：边探索边收集数据边更新 world model
+	- `experiments/cee_us/settings/<env>/curious_exploration/*.yaml`
+2) 进入 **Extrinsic/zero-shot** settings：加载训练好的 world model，用 MPC/planning 做下游任务
+	- `experiments/cee_us/settings/<env>/zero_shot_generalization/*.yaml`
+
+这两阶段共享的关键资产就是你在这一篇里读到的 `GNNForwardModel` / `GNNForwardEnsembleModel`：
+
+- 它们学到的动力学预测能力决定了“在 world model 里 rollout 未来”是否可信
+- 也就直接影响论文关心的：free-play 的交互丰富程度、以及 zero-shot 下游规划是否成功
+
 ## 1. GNNForwardModel 在项目中的位置
 
 它实现了一个 forward model（动力学模型）。

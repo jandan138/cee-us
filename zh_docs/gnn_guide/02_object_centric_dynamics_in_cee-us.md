@@ -16,6 +16,31 @@
 - 你拆出来的这三块输入，后面会被送进 `GNNForwardModel` / `GNNForwardEnsembleModel` 作为世界模型的输入
 - 世界模型学会之后，MPC/planning 才能在“想象空间”里滚动预测未来，做论文里的 curiosity free-play 与下游 zero-shot 规划
 
+### 论文两阶段主线（free-play → zero-shot）与本仓库 settings 的对应
+
+你可以先用一句话记住论文的 pipeline：
+
+- **Intrinsic（free-play）**：用好奇心/新奇性驱动，在 world model 里做规划，采集高交互的数据，把 world model 学好
+- **Extrinsic（downstream）**：冻结（或主要复用）学到的 world model，用 model-based planning 零样本解决下游任务
+
+在本仓库里，这两段最直观的落点就是 settings 路径命名：
+
+- Intrinsic/free-play：`experiments/cee_us/settings/<env>/curious_exploration/*.yaml`
+  - 例如：
+    - `construction/curious_exploration/gnn_ensemble_cee_us.yaml`
+    - `playground/curious_exploration/gnn_ensemble_cee_us.yaml`
+- Extrinsic/zero-shot：`experiments/cee_us/settings/<env>/zero_shot_generalization/*.yaml`
+  - 例如：
+    - `construction/zero_shot_generalization/gnn_ensemble_cee_us_zero_shot_stack.yaml`
+    - `playground/zero_shot_generalization/gnn_ensemble_cee_us_zero_shot_push4.yaml`
+    - `robodesk/zero_shot_generalization/gnn_ensemble_cee_us_zero_shot_open_drawer.yaml`
+
+运行时你会用同一个入口：
+
+- `python -m mbrl.main <settings.yaml>`
+
+而“world model”的核心（也就是我们导读的 GNN forward model）会在这些 settings 里被选择/配置。
+
 ## 1. 本项目的 GNN 是“动力学模型（forward model）”
 
 在 model-based RL / MPC 里，你会需要一个模型：
