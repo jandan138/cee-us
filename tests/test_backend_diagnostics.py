@@ -1,4 +1,5 @@
 import copy
+import os
 import unittest
 from unittest.mock import patch
 
@@ -20,12 +21,47 @@ class BackendDiagnosticsTestCase(unittest.TestCase):
         required_symbols = (
             "render_backend_readiness",
             "diagnose_unified_switch_readiness",
+            "resolve_real_backend_switch_configuration",
         )
         missing = [name for name in required_symbols if not hasattr(diagnostics_module, name)]
         self.assertFalse(
             missing,
             "Unified switch readiness diagnostics API is missing symbols: "
             + ", ".join(sorted(missing)),
+        )
+
+    def test_real_switch_configuration_parses_env_vars(self):
+        with patch.dict(
+            os.environ,
+            {
+                "REAL_BACKEND_SWITCH_PLUGIN_MODULES": "tests.backend_plugin_example, tests.backend_plugin_example",
+                "REAL_BACKEND_SWITCH_PHYSICS_OPTIONS_JSON": "{\"genesis\": {\"skip_dependency_check\": true}}",
+            },
+            clear=False,
+        ):
+            config = diagnostics_module.resolve_real_backend_switch_configuration()
+
+        self.assertEqual(config["backend_plugin_modules"], ["tests.backend_plugin_example"])
+        self.assertEqual(config["options_by_backend"], {"genesis": {"skip_dependency_check": True}})
+
+    def test_real_switch_configuration_rejects_invalid_json_options(self):
+        with patch.dict(
+            os.environ,
+            {"REAL_BACKEND_SWITCH_PHYSICS_OPTIONS_JSON": "{\"genesis\": "},
+            clear=False,
+        ):
+            with self.assertRaises(ValueError):
+                diagnostics_module.resolve_real_backend_switch_configuration()
+
+    def test_collect_backend_diagnostics_allows_real_switch_option_overrides(self):
+        report = diagnostics_module.collect_backend_diagnostics(
+            backend_names=["genesis"],
+            real_switch_options_by_backend={"genesis": {"skip_dependency_check": True}},
+        )
+        real_switch = report["real_backend_switch_test"]
+        self.assertEqual(
+            real_switch["configured_physics_options_by_backend"].get("genesis"),
+            {"skip_dependency_check": True},
         )
 
     def test_unified_switch_readiness_reports_missing_env_mapping(self):

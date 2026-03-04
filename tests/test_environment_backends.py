@@ -9,8 +9,8 @@ from mbrl.environments import env_from_string
 from mbrl.environments.backends import (
     ENV_REGISTRY,
     available_env_backends,
+    diagnose_real_backend_switch_test,
     dispatch_render,
-    list_physics_backends,
     load_backend_plugins,
     normalize_plugin_modules,
     physics_backend_readiness,
@@ -45,47 +45,21 @@ class EnvironmentBackendsTestCase(unittest.TestCase):
         render_backend_module._RENDER_ALIASES.update(self._render_aliases_snapshot)
         reset_loaded_backend_plugins()
 
-    @staticmethod
-    def _format_readiness_failure(readiness):
-        backend_name = readiness.get("backend", "<unknown>")
-        error_type = readiness.get("error_type") or "UnknownError"
-        reason = readiness.get("reason") or "unknown reason"
-        return f"{backend_name}: {error_type}: {reason}"
+    def _require_real_backend_switch_candidate(self, *, backend_plugin_modules=None, options_by_backend=None):
+        report = diagnose_real_backend_switch_test(
+            backend_plugin_modules=backend_plugin_modules,
+            options_by_backend=options_by_backend,
+        )
+        if report["would_skip"]:
+            self.skipTest(report["first_skip_reason"])
 
-    def _require_real_backend_switch_candidate(self):
-        if os.environ.get("ENABLE_REAL_BACKEND_TESTS", "0") != "1":
-            self.skipTest("Set ENABLE_REAL_BACKEND_TESTS=1 to run real non-MuJoCo backend switch tests.")
-
-        implemented_non_mujoco = [
-            name for name, info in list_physics_backends().items() if info["implemented"] and name != "mujoco"
-        ]
-        if not implemented_non_mujoco:
-            self.skipTest("No implemented non-MuJoCo physics backend is registered yet.")
-
-        readiness_failures = []
-        ready_backends_without_mapping = []
-        for backend_name in implemented_non_mujoco:
-            readiness = physics_backend_readiness(backend_name)
-            if not readiness["ready"]:
-                readiness_failures.append(self._format_readiness_failure(readiness))
-                continue
-
-            for env_name, env_backends in ENV_REGISTRY.items():
-                if backend_name in env_backends:
-                    return env_name, backend_name
-            ready_backends_without_mapping.append(backend_name)
-
-        detail_parts = []
-        if readiness_failures:
-            detail_parts.append(f"readiness failures: {'; '.join(readiness_failures)}")
-        if ready_backends_without_mapping:
-            missing_mapping = ", ".join(sorted(ready_backends_without_mapping))
-            detail_parts.append(f"ready backends missing ENV_REGISTRY mapping: {missing_mapping}")
-
-        detail_suffix = f" Details: {' | '.join(detail_parts)}" if detail_parts else ""
-        self.skipTest(
-            "No ready non-MuJoCo backend candidate could be selected for real backend switch test."
-            f"{detail_suffix}"
+        candidate = report["candidate"]
+        if candidate is None:
+            self.skipTest("Real backend switch diagnostics did not return a candidate.")
+        return (
+            candidate["env_name"],
+            candidate["backend_name"],
+            report.get("candidate_physics_backend_options", {}),
         )
 
     def test_register_env_backend_and_overwrite(self):
@@ -217,8 +191,13 @@ class EnvironmentBackendsTestCase(unittest.TestCase):
         self.assertIn("Failed to import backend plugin module", str(error.exception))
 
     def test_real_backend_switch_when_enabled(self):
-        env_name, backend_name = self._require_real_backend_switch_candidate()
-        env = env_from_string(env_name, physics_backend=backend_name, render_backend="none")
+        env_name, backend_name, backend_options = self._require_real_backend_switch_candidate()
+        env = env_from_string(
+            env_name,
+            physics_backend=backend_name,
+            render_backend="none",
+            physics_backend_options=backend_options,
+        )
         self.assertEqual(env.physics_backend, backend_name)
 
     def test_real_backend_switch_skip_reason_reports_genesis_readiness_failure(self):
@@ -240,8 +219,11 @@ class EnvironmentBackendsTestCase(unittest.TestCase):
             "genesis": {"implemented": True},
         }
         with patch.dict(os.environ, {"ENABLE_REAL_BACKEND_TESTS": "1"}, clear=False):
-            with patch(f"{__name__}.list_physics_backends", return_value=backend_info):
-                with patch(f"{__name__}.physics_backend_readiness", return_value=readiness_failure):
+            with patch("mbrl.environments.backends.diagnostics.list_physics_backends", return_value=backend_info):
+                with patch(
+                    "mbrl.environments.backends.diagnostics.physics_backend_readiness",
+                    return_value=readiness_failure,
+                ):
                     with self.assertRaises(unittest.SkipTest) as skipped:
                         self._require_real_backend_switch_candidate()
 
@@ -251,6 +233,61 @@ class EnvironmentBackendsTestCase(unittest.TestCase):
         self.assertIn("genesis", skip_reason)
         self.assertIn("ImportError", skip_reason)
         self.assertIn("not available", skip_reason)
+
+    def test_real_backend_switch_candidate_discovery_loads_plugin_from_env_var(self):
+        with patch.dict(
+            os.environ,
+            {
+                "ENABLE_REAL_BACKEND_TESTS": "1",
+                "REAL_BACKEND_SWITCH_PLUGIN_MODULES": "tests.backend_plugin_example",
+            },
+            clear=False,
+        ):
+            env_name, backend_name, backend_options = self._require_real_backend_switch_candidate()
+
+        self.assertEqual(env_name, "PluginEnv")
+        self.assertEqual(backend_name, "pluginphysics")
+        self.assertEqual(backend_options, {})
+
+    def test_real_backend_switch_candidate_discovery_accepts_explicit_plugin_modules(self):
+        with patch.dict(os.environ, {"ENABLE_REAL_BACKEND_TESTS": "1"}, clear=False):
+            env_name, backend_name, backend_options = self._require_real_backend_switch_candidate(
+                backend_plugin_modules=["tests.backend_plugin_example"]
+            )
+
+        self.assertEqual(env_name, "PluginEnv")
+        self.assertEqual(backend_name, "pluginphysics")
+        self.assertEqual(backend_options, {})
+
+    def test_real_backend_switch_env_construction_uses_backend_options_from_env_var(self):
+        register_env_backend(
+            "GenesisRealSwitchOptionsEnv",
+            "genesis",
+            "mbrl.environments.testsupport_dummy_env",
+            "DummyTestEnv",
+            overwrite=True,
+        )
+        with patch.object(physics_backend_module.GenesisPhysicsBackend, "_is_genesis_available", return_value=False):
+            with patch.dict(
+                os.environ,
+                {
+                    "ENABLE_REAL_BACKEND_TESTS": "1",
+                    "REAL_BACKEND_SWITCH_PHYSICS_OPTIONS_JSON": "{\"genesis\": {\"skip_dependency_check\": true}}",
+                },
+                clear=False,
+            ):
+                env_name, backend_name, backend_options = self._require_real_backend_switch_candidate()
+                env = env_from_string(
+                    env_name,
+                    physics_backend=backend_name,
+                    render_backend="none",
+                    physics_backend_options=backend_options,
+                )
+
+        self.assertEqual(env_name, "GenesisRealSwitchOptionsEnv")
+        self.assertEqual(backend_name, "genesis")
+        self.assertEqual(backend_options, {"skip_dependency_check": True})
+        self.assertEqual(env.physics_backend, "genesis")
 
     def test_genesis_backend_can_switch_when_mapped_and_dependency_check_skipped(self):
         register_env_backend(

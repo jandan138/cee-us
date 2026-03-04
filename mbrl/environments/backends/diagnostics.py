@@ -3,10 +3,13 @@ import json
 import os
 
 from .physics import list_physics_backends, physics_backend_readiness
+from .plugins import load_backend_plugins, normalize_plugin_modules
 from .registry import ENV_REGISTRY
 from .render import render_backend_from_string
 
 REAL_SWITCH_TEST_ENV_VAR = "ENABLE_REAL_BACKEND_TESTS"
+REAL_SWITCH_TEST_PLUGIN_MODULES_ENV_VAR = "REAL_BACKEND_SWITCH_PLUGIN_MODULES"
+REAL_SWITCH_TEST_PHYSICS_OPTIONS_ENV_VAR = "REAL_BACKEND_SWITCH_PHYSICS_OPTIONS_JSON"
 
 
 def _normalize_backend_names(backend_names):
@@ -26,8 +29,64 @@ def _normalize_backend_names(backend_names):
     return normalized
 
 
+def _normalize_real_switch_plugin_modules(plugin_modules):
+    if plugin_modules is None:
+        return []
+    if isinstance(plugin_modules, str):
+        plugin_modules = plugin_modules.split(",")
+    return normalize_plugin_modules(plugin_modules)
+
+
+def _normalize_options_by_backend(options_by_backend):
+    if options_by_backend is None:
+        return {}
+    if isinstance(options_by_backend, str):
+        options_raw = options_by_backend.strip()
+        if not options_raw:
+            return {}
+        try:
+            options_by_backend = json.loads(options_raw)
+        except json.JSONDecodeError as error:
+            raise ValueError(
+                "REAL_BACKEND_SWITCH_PHYSICS_OPTIONS_JSON must be valid JSON object text."
+            ) from error
+
+    if not isinstance(options_by_backend, dict):
+        raise TypeError("options_by_backend must be a dict or a JSON object string")
+
+    normalized = {}
+    for backend_name, backend_options in options_by_backend.items():
+        normalized_name = str(backend_name).strip().lower()
+        if not normalized_name:
+            continue
+        if backend_options is None:
+            normalized[normalized_name] = {}
+            continue
+        if not isinstance(backend_options, dict):
+            raise TypeError(f"options_by_backend['{normalized_name}'] must be a dict")
+        normalized[normalized_name] = dict(backend_options)
+    return normalized
+
+
+def resolve_real_backend_switch_configuration(*, backend_plugin_modules=None, options_by_backend=None):
+    configured_plugin_modules = (
+        backend_plugin_modules
+        if backend_plugin_modules is not None
+        else os.environ.get(REAL_SWITCH_TEST_PLUGIN_MODULES_ENV_VAR, "")
+    )
+    configured_options = (
+        options_by_backend
+        if options_by_backend is not None
+        else os.environ.get(REAL_SWITCH_TEST_PHYSICS_OPTIONS_ENV_VAR, "")
+    )
+    return {
+        "backend_plugin_modules": _normalize_real_switch_plugin_modules(configured_plugin_modules),
+        "options_by_backend": _normalize_options_by_backend(configured_options),
+    }
+
+
 def collect_physics_backend_readiness(backend_names=None, *, options_by_backend=None):
-    options_by_backend = options_by_backend or {}
+    options_by_backend = _normalize_options_by_backend(options_by_backend)
     readiness = {}
     for backend_name in _normalize_backend_names(backend_names):
         readiness[backend_name] = physics_backend_readiness(
@@ -35,6 +94,39 @@ def collect_physics_backend_readiness(backend_names=None, *, options_by_backend=
             options=options_by_backend.get(backend_name),
         )
     return readiness
+
+
+def _format_readiness_failure(readiness):
+    backend_name = readiness.get("backend", "<unknown>")
+    error_type = readiness.get("error_type") or "UnknownError"
+    reason = readiness.get("reason") or "unknown reason"
+    return f"{backend_name}: {error_type}: {reason}"
+
+
+def _select_first_ready_candidate(implemented_non_mujoco, implemented_readiness):
+    candidate = None
+    ready_backends_without_mapping = []
+
+    for backend_name in implemented_non_mujoco:
+        readiness = implemented_readiness.get(backend_name, {})
+        if not readiness.get("ready", False):
+            continue
+        mapped_env_name = None
+        for env_name, env_backends in ENV_REGISTRY.items():
+            if backend_name in env_backends:
+                mapped_env_name = env_name
+                break
+        if mapped_env_name is None:
+            ready_backends_without_mapping.append(backend_name)
+            continue
+
+        candidate = {
+            "env_name": mapped_env_name,
+            "backend_name": backend_name,
+        }
+        break
+
+    return candidate, ready_backends_without_mapping
 
 
 def render_backend_readiness(backend_name):
@@ -148,8 +240,20 @@ def diagnose_unified_switch_readiness(
     }
 
 
-def diagnose_real_backend_switch_test(*, enable_real_backend_tests=None, options_by_backend=None):
-    options_by_backend = options_by_backend or {}
+def diagnose_real_backend_switch_test(
+    *,
+    enable_real_backend_tests=None,
+    options_by_backend=None,
+    backend_plugin_modules=None,
+):
+    config = resolve_real_backend_switch_configuration(
+        backend_plugin_modules=backend_plugin_modules,
+        options_by_backend=options_by_backend,
+    )
+    configured_plugin_modules = config["backend_plugin_modules"]
+    resolved_options_by_backend = config["options_by_backend"]
+    loaded_plugin_modules = load_backend_plugins(configured_plugin_modules)
+
     env_flag_raw = (
         os.environ.get(REAL_SWITCH_TEST_ENV_VAR, "0")
         if enable_real_backend_tests is None
@@ -161,43 +265,59 @@ def diagnose_real_backend_switch_test(*, enable_real_backend_tests=None, options
         name for name, info in list_physics_backends().items() if info.get("implemented", False) and name != "mujoco"
     ]
 
-    candidate = None
-    for env_name, env_backends in ENV_REGISTRY.items():
-        for backend_name in implemented_non_mujoco:
-            if backend_name in env_backends:
-                candidate = {
-                    "env_name": env_name,
-                    "backend_name": backend_name,
-                }
-                break
-        if candidate is not None:
-            break
+    implemented_readiness = collect_physics_backend_readiness(
+        implemented_non_mujoco,
+        options_by_backend=resolved_options_by_backend,
+    )
+
+    candidate, ready_backends_without_mapping = _select_first_ready_candidate(
+        implemented_non_mujoco,
+        implemented_readiness,
+    )
+
+    readiness_failures = []
+    for backend_name in implemented_non_mujoco:
+        readiness = implemented_readiness.get(backend_name, {})
+        if not readiness.get("ready", False):
+            readiness_failures.append(_format_readiness_failure(readiness))
 
     if not env_flag_enabled:
         first_skip_reason = "Set ENABLE_REAL_BACKEND_TESTS=1 to run real non-MuJoCo backend switch tests."
     elif not implemented_non_mujoco:
         first_skip_reason = "No implemented non-MuJoCo physics backend is registered yet."
     elif candidate is None:
-        first_skip_reason = "No ENV_REGISTRY entry exists for implemented non-MuJoCo backends."
+        detail_parts = []
+        if readiness_failures:
+            detail_parts.append(f"readiness failures: {'; '.join(readiness_failures)}")
+        if ready_backends_without_mapping:
+            detail_parts.append(
+                "ready backends missing ENV_REGISTRY mapping: " + ", ".join(sorted(ready_backends_without_mapping))
+            )
+        detail_suffix = f" Details: {' | '.join(detail_parts)}" if detail_parts else ""
+        first_skip_reason = (
+            "No ready non-MuJoCo backend candidate could be selected for real backend switch test." + detail_suffix
+        )
     else:
         first_skip_reason = ""
 
-    implemented_readiness = collect_physics_backend_readiness(
-        implemented_non_mujoco,
-        options_by_backend=options_by_backend,
-    )
     candidate_readiness = None
+    candidate_physics_backend_options = {}
     if candidate is not None:
         candidate_readiness = implemented_readiness.get(candidate["backend_name"])
+        candidate_physics_backend_options = resolved_options_by_backend.get(candidate["backend_name"], {})
 
     next_actions = []
     if not env_flag_enabled:
         next_actions.append("Export ENABLE_REAL_BACKEND_TESTS=1 when you want to run real backend switch tests.")
+    if configured_plugin_modules:
+        next_actions.append(
+            "Keep real-switch plugin module registration deterministic; ensure modules are importable in test env."
+        )
     if not implemented_non_mujoco:
         next_actions.append("Register at least one implemented non-MuJoCo physics backend.")
-    if implemented_non_mujoco and candidate is None:
+    if candidate is None and ready_backends_without_mapping:
         next_actions.append("Add an ENV_REGISTRY mapping for at least one implemented non-MuJoCo backend.")
-    if candidate_readiness is not None and not candidate_readiness.get("ready", False):
+    if readiness_failures:
         next_actions.append(
             "Fix the candidate backend dependency/readiness issue before expecting a successful real switch run."
         )
@@ -209,9 +329,23 @@ def diagnose_real_backend_switch_test(*, enable_real_backend_tests=None, options
             "enabled": env_flag_enabled,
             "expected": "1",
         },
+        "plugin_modules_env_var": {
+            "name": REAL_SWITCH_TEST_PLUGIN_MODULES_ENV_VAR,
+            "value": os.environ.get(REAL_SWITCH_TEST_PLUGIN_MODULES_ENV_VAR, ""),
+        },
+        "physics_options_env_var": {
+            "name": REAL_SWITCH_TEST_PHYSICS_OPTIONS_ENV_VAR,
+            "value": os.environ.get(REAL_SWITCH_TEST_PHYSICS_OPTIONS_ENV_VAR, ""),
+        },
+        "configured_backend_plugin_modules": configured_plugin_modules,
+        "loaded_backend_plugin_modules": loaded_plugin_modules,
+        "configured_physics_options_by_backend": resolved_options_by_backend,
         "implemented_non_mujoco_backends": implemented_non_mujoco,
         "candidate": candidate,
+        "candidate_physics_backend_options": candidate_physics_backend_options,
         "candidate_readiness": candidate_readiness,
+        "ready_backends_without_mapping": ready_backends_without_mapping,
+        "readiness_failures": readiness_failures,
         "implemented_backend_readiness": implemented_readiness,
         "would_skip": bool(first_skip_reason),
         "first_skip_reason": first_skip_reason,
@@ -224,11 +358,16 @@ def collect_backend_diagnostics(
     *,
     enable_real_backend_tests=None,
     options_by_backend=None,
+    real_switch_backend_plugin_modules=None,
+    real_switch_options_by_backend=None,
     env_name=None,
     physics_backend_name=None,
     render_backend_name=None,
 ):
-    options_by_backend = options_by_backend or {}
+    options_by_backend = _normalize_options_by_backend(options_by_backend)
+    resolved_real_switch_options = real_switch_options_by_backend
+    if resolved_real_switch_options is None and options_by_backend:
+        resolved_real_switch_options = options_by_backend
     report = {
         "physics_backend_readiness": collect_physics_backend_readiness(
             backend_names=backend_names,
@@ -236,7 +375,8 @@ def collect_backend_diagnostics(
         ),
         "real_backend_switch_test": diagnose_real_backend_switch_test(
             enable_real_backend_tests=enable_real_backend_tests,
-            options_by_backend=options_by_backend,
+            backend_plugin_modules=real_switch_backend_plugin_modules,
+            options_by_backend=resolved_real_switch_options,
         ),
     }
     if env_name is not None:
@@ -273,6 +413,12 @@ def _format_text_report(report):
         f"- Env flag {env_flag['name']}={env_flag['value']} (expected {env_flag['expected']}): {flag_state}"
     )
     lines.append(
+        f"- Configured plugin modules: {real_switch['configured_backend_plugin_modules'] or 'none'}"
+    )
+    lines.append(
+        f"- Loaded plugin modules: {real_switch['loaded_backend_plugin_modules'] or 'none'}"
+    )
+    lines.append(
         f"- Implemented non-MuJoCo backends: {real_switch['implemented_non_mujoco_backends'] or 'none'}"
     )
 
@@ -292,6 +438,8 @@ def _format_text_report(report):
                     "  "
                     + f"Reason: {candidate_readiness.get('error_type')}: {candidate_readiness.get('reason')}"
                 )
+        candidate_options = real_switch.get("candidate_physics_backend_options", {})
+        lines.append(f"- Candidate physics backend options: {candidate_options or '{}'}")
 
     if real_switch["would_skip"]:
         lines.append(f"- Result: test would be skipped ({real_switch['first_skip_reason']})")
@@ -385,6 +533,24 @@ def _parse_args(argv=None):
         help="Probe Genesis readiness with skip_dependency_check=true (synthetic readiness).",
     )
     parser.add_argument(
+        "--real-switch-plugin-module",
+        action="append",
+        dest="real_switch_plugin_modules",
+        default=None,
+        help=(
+            "Plugin module to load before real-switch candidate discovery "
+            "(repeatable, same behavior as REAL_BACKEND_SWITCH_PLUGIN_MODULES)."
+        ),
+    )
+    parser.add_argument(
+        "--real-switch-physics-options-json",
+        default=None,
+        help=(
+            "JSON object for real-switch readiness/env options by backend, "
+            "e.g. '{\"genesis\": {\"skip_dependency_check\": true}}'."
+        ),
+    )
+    parser.add_argument(
         "--json",
         action="store_true",
         help="Print diagnostics as JSON.",
@@ -399,6 +565,12 @@ def main(argv=None):
     if args.skip_genesis_dependency_check:
         options_by_backend["genesis"] = {"skip_dependency_check": True}
 
+    real_switch_options_by_backend = None
+    if args.real_switch_physics_options_json is not None:
+        real_switch_options_by_backend = _normalize_options_by_backend(args.real_switch_physics_options_json)
+    elif options_by_backend:
+        real_switch_options_by_backend = options_by_backend
+
     tuple_backend_name = args.physics_backend
     if args.env is not None:
         normalized_backends = _normalize_backend_names(args.backends)
@@ -412,6 +584,8 @@ def main(argv=None):
     report = collect_backend_diagnostics(
         backend_names=args.backends,
         options_by_backend=options_by_backend,
+        real_switch_backend_plugin_modules=args.real_switch_plugin_modules,
+        real_switch_options_by_backend=real_switch_options_by_backend,
         env_name=args.env,
         physics_backend_name=tuple_backend_name,
         render_backend_name=args.render_backend,
