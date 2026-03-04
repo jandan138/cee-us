@@ -1,4 +1,10 @@
-from .backends import ENV_REGISTRY, physics_backend_from_string, render_backend_from_string
+from .backends import (
+    ENV_REGISTRY,
+    load_backend_plugins,
+    normalize_plugin_modules,
+    physics_backend_from_string,
+    render_backend_from_string,
+)
 from .wrappers import env_wrapper_from_string
 
 
@@ -7,8 +13,11 @@ def env_from_string(env_string, wrappers=None, **env_params):
 
     physics_backend_name = env_params.pop("physics_backend", env_params.pop("simulator_backend", "mujoco"))
     render_backend_name = env_params.pop("render_backend", env_params.pop("renderer_backend", "native"))
+    backend_plugin_modules = normalize_plugin_modules(env_params.pop("backend_plugin_modules", []))
     physics_backend_options = env_params.pop("physics_backend_options", {})
     render_backend_options = env_params.pop("render_backend_options", {})
+
+    load_backend_plugins(backend_plugin_modules)
 
     physics_backend = physics_backend_from_string(physics_backend_name)
     physics_backend.configure(physics_backend_options)
@@ -33,6 +42,7 @@ def env_from_string(env_string, wrappers=None, **env_params):
     env.init_kwargs["wrappers"] = wrappers
     env.init_kwargs["physics_backend"] = env.physics_backend
     env.init_kwargs["render_backend"] = env.render_backend
+    env.init_kwargs["backend_plugin_modules"] = backend_plugin_modules
     env.init_kwargs["physics_backend_options"] = physics_backend_options
     env.init_kwargs["render_backend_options"] = render_backend_options
 

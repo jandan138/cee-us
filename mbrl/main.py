@@ -7,6 +7,7 @@ import torch
 
 from mbrl import allogger, torch_helpers
 from mbrl.environments import env_from_string
+from mbrl.environments.backends import load_backend_plugins
 from mbrl.helpers import (
     MainState,
     gen_rollouts,
@@ -37,6 +38,14 @@ from mbrl.seeding import Seeding
 warnings.filterwarnings("ignore", category=UserWarning)
 
 
+def _to_list(value):
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple)):
+        return list(value)
+    return [value]
+
+
 def main(params):
     logger = allogger.get_logger(scope="main", basic_logging_params={"level": logging.INFO})
 
@@ -54,9 +63,19 @@ def main(params):
         if hasattr(params.env_params, "_mutable_copy")
         else dict(params.env_params)
     )
+    backend_plugin_modules = []
+    if "backend_plugin_modules" in params:
+        backend_plugin_modules.extend(_to_list(params.backend_plugin_modules))
+    backend_plugin_modules.extend(_to_list(env_params.pop("backend_plugin_modules", [])))
+
+    loaded_plugins = load_backend_plugins(backend_plugin_modules)
+    if loaded_plugins:
+        logger.info(f"Loaded backend plugin modules: {loaded_plugins}")
+
     for backend_key in (
         "physics_backend",
         "render_backend",
+        "backend_plugin_modules",
         "physics_backend_options",
         "render_backend_options",
     ):

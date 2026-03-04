@@ -6,6 +6,7 @@ from mbrl.environments.backends import (
     ENV_REGISTRY,
     available_env_backends,
     dispatch_render,
+    normalize_plugin_modules,
     register_env_backend,
 )
 
@@ -96,6 +97,31 @@ class EnvironmentBackendsTestCase(unittest.TestCase):
         with self.assertRaises(NotImplementedError) as error:
             env_from_string("DummyFutureEnv", physics_backend="isaacsim")
         self.assertIn("register_env_backend", str(error.exception))
+
+    def test_plugin_module_loading_registers_backends(self):
+        env = env_from_string(
+            "PluginEnv",
+            physics_backend="plugin",
+            render_backend="plugin_renderer",
+            backend_plugin_modules=["tests.backend_plugin_example"],
+            seed_value=11,
+        )
+        render_result = dispatch_render(env, mode="human", width=5, height=4, camera_name="cam1")
+
+        self.assertEqual(env.physics_backend, "pluginphysics")
+        self.assertEqual(env.render_backend, "pluginrender")
+        self.assertEqual(render_result["backend"], "pluginrender")
+        self.assertEqual(render_result["camera_name"], "cam1")
+        self.assertEqual(env.init_kwargs["backend_plugin_modules"], ["tests.backend_plugin_example"])
+
+    def test_normalize_plugin_modules(self):
+        self.assertEqual(
+            normalize_plugin_modules([" tests.backend_plugin_example ", "tests.backend_plugin_example", ""]),
+            ["tests.backend_plugin_example"],
+        )
+        self.assertEqual(normalize_plugin_modules("tests.backend_plugin_example"), ["tests.backend_plugin_example"])
+        with self.assertRaises(TypeError):
+            normalize_plugin_modules({"module": "tests.backend_plugin_example"})
 
 
 if __name__ == "__main__":
