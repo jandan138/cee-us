@@ -10,6 +10,7 @@ from .render import render_backend_from_string
 REAL_SWITCH_TEST_ENV_VAR = "ENABLE_REAL_BACKEND_TESTS"
 REAL_SWITCH_TEST_PLUGIN_MODULES_ENV_VAR = "REAL_BACKEND_SWITCH_PLUGIN_MODULES"
 REAL_SWITCH_TEST_PHYSICS_OPTIONS_ENV_VAR = "REAL_BACKEND_SWITCH_PHYSICS_OPTIONS_JSON"
+REAL_SWITCH_TEST_REQUIRE_TRUE_RUNTIME_ENV_VAR = "REAL_BACKEND_SWITCH_REQUIRE_TRUE_RUNTIME"
 
 
 def _normalize_backend_names(backend_names):
@@ -68,7 +69,30 @@ def _normalize_options_by_backend(options_by_backend):
     return normalized
 
 
-def resolve_real_backend_switch_configuration(*, backend_plugin_modules=None, options_by_backend=None):
+def _normalize_bool_flag(flag_value, *, option_name):
+    if isinstance(flag_value, bool):
+        return flag_value
+    normalized = str(flag_value).strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off", ""}:
+        return False
+    raise ValueError(f"{option_name} must be one of: 1/0, true/false, yes/no, on/off.")
+
+
+def _classify_runtime_mode(candidate_options):
+    options = candidate_options or {}
+    if bool(options.get("skip_dependency_check", False)):
+        return "synthetic-runtime", "skip_dependency_check=true"
+    return "true-runtime", "no synthetic-only options enabled"
+
+
+def resolve_real_backend_switch_configuration(
+    *,
+    backend_plugin_modules=None,
+    options_by_backend=None,
+    require_true_runtime=None,
+):
     configured_plugin_modules = (
         backend_plugin_modules
         if backend_plugin_modules is not None
@@ -79,9 +103,18 @@ def resolve_real_backend_switch_configuration(*, backend_plugin_modules=None, op
         if options_by_backend is not None
         else os.environ.get(REAL_SWITCH_TEST_PHYSICS_OPTIONS_ENV_VAR, "")
     )
+    configured_require_true_runtime = (
+        require_true_runtime
+        if require_true_runtime is not None
+        else os.environ.get(REAL_SWITCH_TEST_REQUIRE_TRUE_RUNTIME_ENV_VAR, "0")
+    )
     return {
         "backend_plugin_modules": _normalize_real_switch_plugin_modules(configured_plugin_modules),
         "options_by_backend": _normalize_options_by_backend(configured_options),
+        "require_true_runtime": _normalize_bool_flag(
+            configured_require_true_runtime,
+            option_name=REAL_SWITCH_TEST_REQUIRE_TRUE_RUNTIME_ENV_VAR,
+        ),
     }
 
 
@@ -245,13 +278,22 @@ def diagnose_real_backend_switch_test(
     enable_real_backend_tests=None,
     options_by_backend=None,
     backend_plugin_modules=None,
+    require_true_runtime=None,
 ):
     config = resolve_real_backend_switch_configuration(
         backend_plugin_modules=backend_plugin_modules,
         options_by_backend=options_by_backend,
+        require_true_runtime=require_true_runtime,
     )
     configured_plugin_modules = config["backend_plugin_modules"]
     resolved_options_by_backend = config["options_by_backend"]
+    require_true_runtime_enabled = config["require_true_runtime"]
+    require_true_runtime_raw = (
+        os.environ.get(REAL_SWITCH_TEST_REQUIRE_TRUE_RUNTIME_ENV_VAR, "0")
+        if require_true_runtime is None
+        else str(require_true_runtime)
+    )
+    require_true_runtime_source = "env" if require_true_runtime is None else "api"
     loaded_plugin_modules = load_backend_plugins(configured_plugin_modules)
 
     env_flag_raw = (
@@ -281,6 +323,21 @@ def diagnose_real_backend_switch_test(
         if not readiness.get("ready", False):
             readiness_failures.append(_format_readiness_failure(readiness))
 
+    candidate_readiness = None
+    candidate_physics_backend_options = {}
+    candidate_runtime_mode = None
+    candidate_runtime_mode_reason = ""
+    if candidate is not None:
+        candidate_readiness = implemented_readiness.get(candidate["backend_name"])
+        candidate_physics_backend_options = resolved_options_by_backend.get(candidate["backend_name"], {})
+        candidate_runtime_mode, candidate_runtime_mode_reason = _classify_runtime_mode(
+            candidate_physics_backend_options
+        )
+
+    strict_runtime_violated = bool(
+        require_true_runtime_enabled and candidate is not None and candidate_runtime_mode == "synthetic-runtime"
+    )
+
     if not env_flag_enabled:
         first_skip_reason = "Set ENABLE_REAL_BACKEND_TESTS=1 to run real non-MuJoCo backend switch tests."
     elif not implemented_non_mujoco:
@@ -297,18 +354,23 @@ def diagnose_real_backend_switch_test(
         first_skip_reason = (
             "No ready non-MuJoCo backend candidate could be selected for real backend switch test." + detail_suffix
         )
+    elif strict_runtime_violated:
+        first_skip_reason = (
+            "Strict true-runtime policy is enabled, but candidate "
+            f"{candidate['env_name']} / {candidate['backend_name']} is synthetic-runtime "
+            f"({candidate_runtime_mode_reason})."
+        )
     else:
         first_skip_reason = ""
-
-    candidate_readiness = None
-    candidate_physics_backend_options = {}
-    if candidate is not None:
-        candidate_readiness = implemented_readiness.get(candidate["backend_name"])
-        candidate_physics_backend_options = resolved_options_by_backend.get(candidate["backend_name"], {})
 
     next_actions = []
     if not env_flag_enabled:
         next_actions.append("Export ENABLE_REAL_BACKEND_TESTS=1 when you want to run real backend switch tests.")
+    if not require_true_runtime_enabled:
+        next_actions.append(
+            "Set REAL_BACKEND_SWITCH_REQUIRE_TRUE_RUNTIME=1 (or pass --real-switch-require-true-runtime) "
+            "to block synthetic-runtime candidates."
+        )
     if configured_plugin_modules:
         next_actions.append(
             "Keep real-switch plugin module registration deterministic; ensure modules are importable in test env."
@@ -320,6 +382,10 @@ def diagnose_real_backend_switch_test(
     if readiness_failures:
         next_actions.append(
             "Fix the candidate backend dependency/readiness issue before expecting a successful real switch run."
+        )
+    if strict_runtime_violated:
+        next_actions.append(
+            "Use true runtime dependencies/options (e.g., disable skip_dependency_check) for strict mode runs."
         )
 
     return {
@@ -337,12 +403,22 @@ def diagnose_real_backend_switch_test(
             "name": REAL_SWITCH_TEST_PHYSICS_OPTIONS_ENV_VAR,
             "value": os.environ.get(REAL_SWITCH_TEST_PHYSICS_OPTIONS_ENV_VAR, ""),
         },
+        "require_true_runtime_flag": {
+            "name": REAL_SWITCH_TEST_REQUIRE_TRUE_RUNTIME_ENV_VAR,
+            "value": require_true_runtime_raw,
+            "enabled": require_true_runtime_enabled,
+            "expected": "1",
+            "source": require_true_runtime_source,
+            "violated": strict_runtime_violated,
+        },
         "configured_backend_plugin_modules": configured_plugin_modules,
         "loaded_backend_plugin_modules": loaded_plugin_modules,
         "configured_physics_options_by_backend": resolved_options_by_backend,
         "implemented_non_mujoco_backends": implemented_non_mujoco,
         "candidate": candidate,
         "candidate_physics_backend_options": candidate_physics_backend_options,
+        "candidate_runtime_mode": candidate_runtime_mode,
+        "candidate_runtime_mode_reason": candidate_runtime_mode_reason,
         "candidate_readiness": candidate_readiness,
         "ready_backends_without_mapping": ready_backends_without_mapping,
         "readiness_failures": readiness_failures,
@@ -360,6 +436,7 @@ def collect_backend_diagnostics(
     options_by_backend=None,
     real_switch_backend_plugin_modules=None,
     real_switch_options_by_backend=None,
+    real_switch_require_true_runtime=None,
     env_name=None,
     physics_backend_name=None,
     render_backend_name=None,
@@ -377,6 +454,7 @@ def collect_backend_diagnostics(
             enable_real_backend_tests=enable_real_backend_tests,
             backend_plugin_modules=real_switch_backend_plugin_modules,
             options_by_backend=resolved_real_switch_options,
+            require_true_runtime=real_switch_require_true_runtime,
         ),
     }
     if env_name is not None:
@@ -412,6 +490,12 @@ def _format_text_report(report):
     lines.append(
         f"- Env flag {env_flag['name']}={env_flag['value']} (expected {env_flag['expected']}): {flag_state}"
     )
+    strict_flag = real_switch["require_true_runtime_flag"]
+    strict_state = "ENFORCED" if strict_flag["enabled"] else "disabled"
+    lines.append(
+        f"- Strict true-runtime policy {strict_flag['name']}={strict_flag['value']} "
+        f"(expected {strict_flag['expected']}): {strict_state}"
+    )
     lines.append(
         f"- Configured plugin modules: {real_switch['configured_backend_plugin_modules'] or 'none'}"
     )
@@ -428,6 +512,10 @@ def _format_text_report(report):
     else:
         lines.append(
             f"- Candidate env/backend mapping: {candidate['env_name']} / {candidate['backend_name']}"
+        )
+        lines.append(
+            f"- Candidate runtime mode: {real_switch.get('candidate_runtime_mode')} "
+            f"({real_switch.get('candidate_runtime_mode_reason')})"
         )
         candidate_readiness = real_switch.get("candidate_readiness")
         if candidate_readiness is not None:
@@ -551,6 +639,15 @@ def _parse_args(argv=None):
         ),
     )
     parser.add_argument(
+        "--real-switch-require-true-runtime",
+        action="store_true",
+        default=None,
+        help=(
+            "Require candidate runtime mode to be true-runtime. "
+            "Equivalent to REAL_BACKEND_SWITCH_REQUIRE_TRUE_RUNTIME=1."
+        ),
+    )
+    parser.add_argument(
         "--json",
         action="store_true",
         help="Print diagnostics as JSON.",
@@ -586,6 +683,7 @@ def main(argv=None):
         options_by_backend=options_by_backend,
         real_switch_backend_plugin_modules=args.real_switch_plugin_modules,
         real_switch_options_by_backend=real_switch_options_by_backend,
+        real_switch_require_true_runtime=args.real_switch_require_true_runtime,
         env_name=args.env,
         physics_backend_name=tuple_backend_name,
         render_backend_name=args.render_backend,

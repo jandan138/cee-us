@@ -45,10 +45,17 @@ class EnvironmentBackendsTestCase(unittest.TestCase):
         render_backend_module._RENDER_ALIASES.update(self._render_aliases_snapshot)
         reset_loaded_backend_plugins()
 
-    def _require_real_backend_switch_candidate(self, *, backend_plugin_modules=None, options_by_backend=None):
+    def _require_real_backend_switch_candidate(
+        self,
+        *,
+        backend_plugin_modules=None,
+        options_by_backend=None,
+        require_true_runtime=None,
+    ):
         report = diagnose_real_backend_switch_test(
             backend_plugin_modules=backend_plugin_modules,
             options_by_backend=options_by_backend,
+            require_true_runtime=require_true_runtime,
         )
         if report["would_skip"]:
             self.skipTest(report["first_skip_reason"])
@@ -273,6 +280,7 @@ class EnvironmentBackendsTestCase(unittest.TestCase):
                 {
                     "ENABLE_REAL_BACKEND_TESTS": "1",
                     "REAL_BACKEND_SWITCH_PHYSICS_OPTIONS_JSON": "{\"genesis\": {\"skip_dependency_check\": true}}",
+                    "REAL_BACKEND_SWITCH_REQUIRE_TRUE_RUNTIME": "0",
                 },
                 clear=False,
             ):
@@ -288,6 +296,30 @@ class EnvironmentBackendsTestCase(unittest.TestCase):
         self.assertEqual(backend_name, "genesis")
         self.assertEqual(backend_options, {"skip_dependency_check": True})
         self.assertEqual(env.physics_backend, "genesis")
+
+    def test_real_backend_switch_helper_honors_strict_policy(self):
+        register_env_backend(
+            "GenesisStrictRuntimeEnv",
+            "genesis",
+            "mbrl.environments.testsupport_dummy_env",
+            "DummyTestEnv",
+            overwrite=True,
+        )
+        with patch.object(physics_backend_module.GenesisPhysicsBackend, "_is_genesis_available", return_value=False):
+            with patch.dict(
+                os.environ,
+                {"ENABLE_REAL_BACKEND_TESTS": "1"},
+                clear=False,
+            ):
+                with self.assertRaises(unittest.SkipTest) as skipped:
+                    self._require_real_backend_switch_candidate(
+                        options_by_backend={"genesis": {"skip_dependency_check": True}},
+                        require_true_runtime=True,
+                    )
+
+        skip_reason = str(skipped.exception)
+        self.assertIn("Strict true-runtime policy is enabled", skip_reason)
+        self.assertIn("synthetic-runtime", skip_reason)
 
     def test_genesis_backend_can_switch_when_mapped_and_dependency_check_skipped(self):
         register_env_backend(
