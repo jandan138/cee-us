@@ -30,6 +30,18 @@
 - 再复制 How to run 的示例命令直接运行；
 - 成功后再改 YAML 做自己的实验。
 
+## Agent Team（新手入口）
+
+如果你想用本仓库的多代理协作能力（含 `/agent` 线程管理、日志审计、worktree 隔离），先看：
+
+- [Agent Team 新手上手指南（小白版）](docs/agent_team_beginner_guide_zh.md)
+
+最短触发方式是在主线程说：
+
+```text
+用agent team，目标是：<你的任务目标>
+```
+
 <p align="center">
 <img src="docs/images/cee_us_summary.gif" width="500"/>
 </p>

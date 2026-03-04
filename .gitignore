@@ -138,3 +138,7 @@ _site/
 .sass-cache/
 .jekyll-cache/
 .jekyll-metadata
+
+# Agent team run-time artifacts (keep folder structure only)
+agent_team/runs/*
+!agent_team/runs/.gitkeep
