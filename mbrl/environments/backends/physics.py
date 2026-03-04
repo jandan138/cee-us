@@ -14,6 +14,8 @@ class PhysicsBackend(ABC):
 
     def __init__(self):
         self.options = {}
+        # Backend readiness metadata used by diagnostics.
+        self.dependency_source = "local"
 
     def configure(self, options=None):
         self.options = options or {}
@@ -177,15 +179,18 @@ class GenesisPhysicsBackend(PhysicsBackend):
     def prepare_backend(self, options=None):
         options = options or {}
         if options.get("skip_dependency_check", False):
+            self.dependency_source = "synthetic"
             return
 
         module_name = options.get("module_name", "genesis")
         if self._is_genesis_available(module_name):
+            self.dependency_source = "local"
             return
 
         external_python = options.get("external_python")
         external_probe_reason = ""
         if external_python:
+            self.dependency_source = "external"
             pyopengl_platform = options.get("PYOPENGL_PLATFORM", options.get("pyopengl_platform"))
             external_probe_env = options.get("external_probe_env", options.get("external_env"))
             timeout_seconds = options.get("external_probe_timeout_sec", 10.0)
@@ -198,6 +203,8 @@ class GenesisPhysicsBackend(PhysicsBackend):
             )
             if available_in_external_runtime:
                 return
+        else:
+            self.dependency_source = "local"
 
         error_message = (
             "Physics backend 'Genesis' selected, but the 'genesis' package is not available. "
@@ -259,6 +266,7 @@ def physics_backend_readiness(backend_name, options=None):
         "ready": False,
         "error_type": None,
         "reason": "",
+        "dependency_source": "unknown",
     }
     try:
         backend = physics_backend_from_string(backend_name)
@@ -268,6 +276,7 @@ def physics_backend_readiness(backend_name, options=None):
         return readiness
 
     readiness["backend"] = backend.backend_name
+    readiness["dependency_source"] = getattr(backend, "dependency_source", "local")
     if not bool(getattr(backend, "implemented", False)):
         readiness["error_type"] = "NotImplementedError"
         readiness["reason"] = (
@@ -279,10 +288,12 @@ def physics_backend_readiness(backend_name, options=None):
     try:
         backend.prepare_backend(options=backend.options)
     except Exception as error:
+        readiness["dependency_source"] = getattr(backend, "dependency_source", readiness["dependency_source"])
         readiness["error_type"] = type(error).__name__
         readiness["reason"] = str(error)
         return readiness
 
+    readiness["dependency_source"] = getattr(backend, "dependency_source", readiness["dependency_source"])
     readiness["ready"] = True
     return readiness
 

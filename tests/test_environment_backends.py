@@ -9,12 +9,12 @@ from mbrl.environments import env_from_string
 from mbrl.environments.backends import (
     ENV_REGISTRY,
     available_env_backends,
-    diagnose_real_backend_switch_test,
     dispatch_render,
     load_backend_plugins,
     normalize_plugin_modules,
     physics_backend_readiness,
     register_env_backend,
+    resolve_real_backend_switch_execution_target,
     reset_loaded_backend_plugins,
 )
 from mbrl.environments.backends import physics as physics_backend_module
@@ -52,21 +52,17 @@ class EnvironmentBackendsTestCase(unittest.TestCase):
         options_by_backend=None,
         require_true_runtime=None,
     ):
-        report = diagnose_real_backend_switch_test(
+        target = resolve_real_backend_switch_execution_target(
             backend_plugin_modules=backend_plugin_modules,
             options_by_backend=options_by_backend,
             require_true_runtime=require_true_runtime,
         )
-        if report["would_skip"]:
-            self.skipTest(report["first_skip_reason"])
-
-        candidate = report["candidate"]
-        if candidate is None:
-            self.skipTest("Real backend switch diagnostics did not return a candidate.")
+        if not target["selected"]:
+            self.skipTest(target["skip_reason"])
         return (
-            candidate["env_name"],
-            candidate["backend_name"],
-            report.get("candidate_physics_backend_options", {}),
+            target["env_name"],
+            target["backend_name"],
+            target.get("physics_backend_options", {}),
         )
 
     def test_register_env_backend_and_overwrite(self):
@@ -400,6 +396,7 @@ class EnvironmentBackendsTestCase(unittest.TestCase):
         self.assertFalse(readiness["ready"])
         self.assertEqual(readiness["backend"], "genesis")
         self.assertEqual(readiness["error_type"], "ImportError")
+        self.assertEqual(readiness["dependency_source"], "local")
         self.assertIn("Genesis", readiness["reason"])
 
     def test_genesis_backend_can_use_external_runtime_probe_when_local_module_missing(self):
@@ -451,6 +448,7 @@ class EnvironmentBackendsTestCase(unittest.TestCase):
         self.assertFalse(readiness["ready"])
         self.assertEqual(readiness["backend"], "genesis")
         self.assertEqual(readiness["error_type"], "ImportError")
+        self.assertEqual(readiness["dependency_source"], "external")
         self.assertIn("external_python", readiness["reason"])
         self.assertIn("external runtime probe returned 1", readiness["reason"])
 
@@ -461,6 +459,7 @@ class EnvironmentBackendsTestCase(unittest.TestCase):
         self.assertTrue(readiness["ready"])
         self.assertEqual(readiness["backend"], "genesis")
         self.assertEqual(readiness["error_type"], None)
+        self.assertEqual(readiness["dependency_source"], "synthetic")
 
 
 if __name__ == "__main__":

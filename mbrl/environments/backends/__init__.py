@@ -28,6 +28,14 @@ def diagnose_real_backend_switch_test(*args, **kwargs):
     return _diagnose_real_backend_switch_test(*args, **kwargs)
 
 
+def resolve_real_backend_switch_execution_target(*args, **kwargs):
+    from .diagnostics import (
+        resolve_real_backend_switch_execution_target as _resolve_real_backend_switch_execution_target,
+    )
+
+    return _resolve_real_backend_switch_execution_target(*args, **kwargs)
+
+
 def resolve_real_backend_switch_configuration(*args, **kwargs):
     from .diagnostics import resolve_real_backend_switch_configuration as _resolve_real_backend_switch_configuration
 
@@ -62,6 +70,7 @@ __all__ = [
     "physics_backend_readiness",
     "collect_physics_backend_readiness",
     "diagnose_real_backend_switch_test",
+    "resolve_real_backend_switch_execution_target",
     "resolve_real_backend_switch_configuration",
     "collect_backend_diagnostics",
     "render_backend_readiness",

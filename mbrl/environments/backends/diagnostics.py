@@ -142,10 +142,16 @@ def _merge_genesis_external_probe_options(
     return merged
 
 
-def _classify_runtime_mode(candidate_options):
+def _classify_runtime_mode(candidate_options, candidate_readiness=None):
     options = candidate_options or {}
+    readiness = candidate_readiness or {}
+    dependency_source = str(readiness.get("dependency_source", "")).strip().lower()
     if bool(options.get("skip_dependency_check", False)):
         return "synthetic-runtime", "skip_dependency_check=true"
+    if dependency_source == "synthetic":
+        return "synthetic-runtime", "dependency_source=synthetic"
+    if dependency_source == "external":
+        return "external-runtime", "dependency_source=external"
     return "true-runtime", "no synthetic-only options enabled"
 
 
@@ -424,7 +430,8 @@ def diagnose_real_backend_switch_test(
         candidate_readiness = implemented_readiness.get(candidate["backend_name"])
         candidate_physics_backend_options = resolved_options_by_backend.get(candidate["backend_name"], {})
         candidate_runtime_mode, candidate_runtime_mode_reason = _classify_runtime_mode(
-            candidate_physics_backend_options
+            candidate_physics_backend_options,
+            candidate_readiness,
         )
 
     strict_runtime_violated = bool(
@@ -534,6 +541,43 @@ def diagnose_real_backend_switch_test(
     }
 
 
+def resolve_real_backend_switch_execution_target(
+    *,
+    enable_real_backend_tests=None,
+    options_by_backend=None,
+    backend_plugin_modules=None,
+    require_true_runtime=None,
+    genesis_external_python=None,
+    genesis_probe_timeout_sec=None,
+    genesis_pyopengl_platform=None,
+):
+    report = diagnose_real_backend_switch_test(
+        enable_real_backend_tests=enable_real_backend_tests,
+        options_by_backend=options_by_backend,
+        backend_plugin_modules=backend_plugin_modules,
+        require_true_runtime=require_true_runtime,
+        genesis_external_python=genesis_external_python,
+        genesis_probe_timeout_sec=genesis_probe_timeout_sec,
+        genesis_pyopengl_platform=genesis_pyopengl_platform,
+    )
+    candidate = report.get("candidate")
+    selected = bool(candidate is not None and not report.get("would_skip", False))
+    skip_reason = ""
+    if not selected:
+        skip_reason = report.get("first_skip_reason") or "No real backend switch candidate is available."
+
+    return {
+        "selected": selected,
+        "skip_reason": skip_reason,
+        "env_name": candidate.get("env_name") if selected else None,
+        "backend_name": candidate.get("backend_name") if selected else None,
+        "physics_backend_options": report.get("candidate_physics_backend_options", {}) if selected else {},
+        "candidate_runtime_mode": report.get("candidate_runtime_mode"),
+        "candidate_runtime_mode_reason": report.get("candidate_runtime_mode_reason"),
+        "report": report,
+    }
+
+
 def collect_backend_diagnostics(
     backend_names=None,
     *,
@@ -587,10 +631,13 @@ def _format_text_report(report):
         resolved_backend = backend_result.get("backend")
         status = "READY" if backend_result.get("ready") else "NOT READY"
         line = f"- {requested_name} -> {resolved_backend}: {status}"
+        dependency_source = backend_result.get("dependency_source")
+        if dependency_source:
+            line += f" (dependency_source={dependency_source})"
         if not backend_result.get("ready"):
             error_type = backend_result.get("error_type") or "Error"
             reason = backend_result.get("reason", "")
-            line = f"{line} ({error_type}: {reason})"
+            line = f"{line} [{error_type}: {reason}]"
         lines.append(line)
 
     real_switch = report["real_backend_switch_test"]
@@ -641,6 +688,9 @@ def _format_text_report(report):
         if candidate_readiness is not None:
             candidate_status = "READY" if candidate_readiness.get("ready") else "NOT READY"
             lines.append(f"- Candidate backend readiness: {candidate_status}")
+            candidate_dependency_source = candidate_readiness.get("dependency_source")
+            if candidate_dependency_source:
+                lines.append(f"  dependency_source={candidate_dependency_source}")
             if not candidate_readiness.get("ready"):
                 lines.append(
                     "  "

@@ -22,6 +22,7 @@ class BackendDiagnosticsTestCase(unittest.TestCase):
             "render_backend_readiness",
             "diagnose_unified_switch_readiness",
             "resolve_real_backend_switch_configuration",
+            "resolve_real_backend_switch_execution_target",
         )
         missing = [name for name in required_symbols if not hasattr(diagnostics_module, name)]
         self.assertFalse(
@@ -152,6 +153,70 @@ class BackendDiagnosticsTestCase(unittest.TestCase):
         self.assertIn("Strict true-runtime policy is enabled", report["first_skip_reason"])
         self.assertIn("synthetic-runtime", report["first_skip_reason"])
 
+    def test_real_switch_reports_external_runtime_mode_when_readiness_uses_external_dependency(self):
+        register_env_backend(
+            "GenesisExternalRuntimeModeEnv",
+            "genesis",
+            "mbrl.environments.testsupport_dummy_env",
+            "DummyTestEnv",
+            overwrite=True,
+        )
+        with patch.object(physics_backend_module.GenesisPhysicsBackend, "_is_genesis_available", return_value=False):
+            with patch.object(
+                physics_backend_module.GenesisPhysicsBackend,
+                "_is_genesis_available_via_external_runtime",
+                return_value=(True, "module import probe succeeded in external runtime"),
+            ):
+                report = diagnostics_module.diagnose_real_backend_switch_test(
+                    enable_real_backend_tests=1,
+                    options_by_backend={"genesis": {"external_python": ".venv-genesis/bin/python"}},
+                    require_true_runtime=True,
+                )
+
+        self.assertIsNotNone(report["candidate"])
+        self.assertEqual(report["candidate"]["backend_name"], "genesis")
+        self.assertEqual(report["candidate_runtime_mode"], "external-runtime")
+        self.assertEqual(report["candidate_runtime_mode_reason"], "dependency_source=external")
+        self.assertFalse(report["require_true_runtime_flag"]["violated"])
+        self.assertFalse(report["would_skip"])
+
+    def test_resolve_real_backend_switch_execution_target_selects_candidate(self):
+        report = {
+            "candidate": {"env_name": "GenesisCandidateEnv", "backend_name": "genesis"},
+            "candidate_physics_backend_options": {"external_python": ".venv-genesis/bin/python"},
+            "candidate_runtime_mode": "external-runtime",
+            "candidate_runtime_mode_reason": "dependency_source=external",
+            "would_skip": False,
+            "first_skip_reason": "",
+        }
+        with patch.object(diagnostics_module, "diagnose_real_backend_switch_test", return_value=report):
+            target = diagnostics_module.resolve_real_backend_switch_execution_target(enable_real_backend_tests=1)
+
+        self.assertTrue(target["selected"])
+        self.assertEqual(target["skip_reason"], "")
+        self.assertEqual(target["env_name"], "GenesisCandidateEnv")
+        self.assertEqual(target["backend_name"], "genesis")
+        self.assertEqual(target["physics_backend_options"], {"external_python": ".venv-genesis/bin/python"})
+        self.assertEqual(target["candidate_runtime_mode"], "external-runtime")
+
+    def test_resolve_real_backend_switch_execution_target_propagates_skip_reason(self):
+        report = {
+            "candidate": {"env_name": "GenesisSyntheticEnv", "backend_name": "genesis"},
+            "candidate_physics_backend_options": {"skip_dependency_check": True},
+            "candidate_runtime_mode": "synthetic-runtime",
+            "candidate_runtime_mode_reason": "skip_dependency_check=true",
+            "would_skip": True,
+            "first_skip_reason": "Strict true-runtime policy is enabled",
+        }
+        with patch.object(diagnostics_module, "diagnose_real_backend_switch_test", return_value=report):
+            target = diagnostics_module.resolve_real_backend_switch_execution_target(enable_real_backend_tests=1)
+
+        self.assertFalse(target["selected"])
+        self.assertEqual(target["skip_reason"], "Strict true-runtime policy is enabled")
+        self.assertIsNone(target["env_name"])
+        self.assertIsNone(target["backend_name"])
+        self.assertEqual(target["physics_backend_options"], {})
+
     def test_diagnostics_cli_accepts_real_switch_require_true_runtime_flag(self):
         with patch.object(diagnostics_module, "collect_backend_diagnostics", return_value={"ok": True}) as collect_fn:
             with patch("builtins.print"):
@@ -265,6 +330,7 @@ class BackendDiagnosticsTestCase(unittest.TestCase):
         physics_reason = report["physics_backend_readiness"]
         self.assertFalse(physics_reason["ready"])
         self.assertEqual(physics_reason["error_type"], "ImportError")
+        self.assertEqual(physics_reason["dependency_source"], "local")
         self.assertIn("Physics backend 'Genesis' selected", physics_reason["reason"])
         self.assertIn("'genesis' package is not available", physics_reason["reason"])
         self.assertIn("skip_dependency_check", physics_reason["reason"])

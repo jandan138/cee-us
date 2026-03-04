@@ -81,6 +81,7 @@ class GenesisExternalRuntimeBridgeTestCase(unittest.TestCase):
 
         self.assertTrue(readiness["ready"])
         self.assertIsNone(readiness["error_type"])
+        self.assertEqual(readiness["dependency_source"], "external")
         run_mock.assert_called()
 
     def test_external_runtime_probe_failure_path(self):
@@ -94,6 +95,7 @@ class GenesisExternalRuntimeBridgeTestCase(unittest.TestCase):
 
         self.assertFalse(readiness["ready"])
         self.assertEqual(readiness["error_type"], "ImportError")
+        self.assertEqual(readiness["dependency_source"], "external")
         self.assertTrue(
             "external" in readiness["reason"].lower() or "python" in readiness["reason"].lower(),
             "Failure reason should include external probe context.",
@@ -110,6 +112,7 @@ class GenesisExternalRuntimeBridgeTestCase(unittest.TestCase):
 
         self.assertFalse(readiness["ready"])
         self.assertIn(readiness["error_type"], {"ImportError", "TimeoutExpired", "RuntimeError"})
+        self.assertEqual(readiness["dependency_source"], "external")
         self.assertTrue(
             "timeout" in readiness["reason"].lower()
             or "external" in readiness["reason"].lower()
@@ -127,12 +130,14 @@ class GenesisExternalRuntimeBridgeTestCase(unittest.TestCase):
                     "ready": True,
                     "error_type": None,
                     "reason": "",
+                    "dependency_source": "external",
                 }
             return {
                 "backend": backend_name,
                 "ready": False,
                 "error_type": "NotImplementedError",
                 "reason": "not relevant",
+                "dependency_source": "local",
             }
 
         with patch(
@@ -151,7 +156,8 @@ class GenesisExternalRuntimeBridgeTestCase(unittest.TestCase):
 
         self.assertIsNotNone(report["candidate"])
         self.assertEqual(report["candidate"]["backend_name"], "genesis")
-        self.assertEqual(report["candidate_runtime_mode"], "true-runtime")
+        self.assertEqual(report["candidate_runtime_mode"], "external-runtime")
+        self.assertEqual(report["candidate_runtime_mode_reason"], "dependency_source=external")
         self.assertFalse(report["require_true_runtime_flag"]["violated"])
         self.assertFalse(_is_blocked(report))
 
@@ -165,12 +171,14 @@ class GenesisExternalRuntimeBridgeTestCase(unittest.TestCase):
                     "ready": False,
                     "error_type": "ImportError",
                     "reason": "external probe timeout",
+                    "dependency_source": "external",
                 }
             return {
                 "backend": backend_name,
                 "ready": False,
                 "error_type": "NotImplementedError",
                 "reason": "not relevant",
+                "dependency_source": "local",
             }
 
         with patch(
@@ -199,6 +207,7 @@ class GenesisExternalRuntimeBridgeTestCase(unittest.TestCase):
         self.assertFalse(readiness["ready"])
         self.assertEqual(readiness["backend"], "genesis")
         self.assertEqual(readiness["error_type"], "ImportError")
+        self.assertEqual(readiness["dependency_source"], "local")
         run_mock.assert_not_called()
 
     def test_real_switch_configuration_env_injection_for_external_python_and_opengl(self):
