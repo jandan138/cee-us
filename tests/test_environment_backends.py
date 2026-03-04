@@ -297,6 +297,46 @@ class EnvironmentBackendsTestCase(unittest.TestCase):
         self.assertEqual(backend_options, {"skip_dependency_check": True})
         self.assertEqual(env.physics_backend, "genesis")
 
+    def test_real_backend_switch_env_construction_uses_external_probe_options_from_env_var(self):
+        register_env_backend(
+            "GenesisExternalProbeOptionsEnv",
+            "genesis",
+            "mbrl.environments.testsupport_dummy_env",
+            "DummyTestEnv",
+            overwrite=True,
+        )
+        with patch.object(physics_backend_module.GenesisPhysicsBackend, "_is_genesis_available", return_value=False):
+            with patch.object(
+                physics_backend_module.GenesisPhysicsBackend,
+                "_is_genesis_available_via_external_runtime",
+                return_value=(True, "module import probe succeeded in external runtime"),
+            ):
+                with patch.dict(
+                    os.environ,
+                    {
+                        "ENABLE_REAL_BACKEND_TESTS": "1",
+                        "REAL_BACKEND_SWITCH_GENESIS_EXTERNAL_PYTHON": ".venv-genesis/bin/python",
+                        "REAL_BACKEND_SWITCH_GENESIS_PROBE_TIMEOUT_SEC": "8",
+                        "REAL_BACKEND_SWITCH_GENESIS_PYOPENGL_PLATFORM": "egl",
+                        "REAL_BACKEND_SWITCH_REQUIRE_TRUE_RUNTIME": "1",
+                    },
+                    clear=False,
+                ):
+                    env_name, backend_name, backend_options = self._require_real_backend_switch_candidate()
+                    env = env_from_string(
+                        env_name,
+                        physics_backend=backend_name,
+                        render_backend="none",
+                        physics_backend_options=backend_options,
+                    )
+
+        self.assertEqual(env_name, "GenesisExternalProbeOptionsEnv")
+        self.assertEqual(backend_name, "genesis")
+        self.assertEqual(backend_options["external_python"], ".venv-genesis/bin/python")
+        self.assertEqual(backend_options["external_probe_timeout_sec"], 8.0)
+        self.assertEqual(backend_options["PYOPENGL_PLATFORM"], "egl")
+        self.assertEqual(env.physics_backend, "genesis")
+
     def test_real_backend_switch_helper_honors_strict_policy(self):
         register_env_backend(
             "GenesisStrictRuntimeEnv",
@@ -361,6 +401,58 @@ class EnvironmentBackendsTestCase(unittest.TestCase):
         self.assertEqual(readiness["backend"], "genesis")
         self.assertEqual(readiness["error_type"], "ImportError")
         self.assertIn("Genesis", readiness["reason"])
+
+    def test_genesis_backend_can_use_external_runtime_probe_when_local_module_missing(self):
+        register_env_backend(
+            "GenesisExternalProbeEnv",
+            "genesis",
+            "mbrl.environments.testsupport_dummy_env",
+            "DummyTestEnv",
+            overwrite=True,
+        )
+        with patch.object(physics_backend_module.GenesisPhysicsBackend, "_is_genesis_available", return_value=False):
+            with patch.object(
+                physics_backend_module.GenesisPhysicsBackend,
+                "_is_genesis_available_via_external_runtime",
+                return_value=(True, "module import probe succeeded in external runtime"),
+            ) as external_probe:
+                env = env_from_string(
+                    "GenesisExternalProbeEnv",
+                    physics_backend="genesis",
+                    render_backend="none",
+                    physics_backend_options={
+                        "external_python": ".venv-genesis/bin/python",
+                        "external_probe_timeout_sec": 12,
+                        "PYOPENGL_PLATFORM": "egl",
+                    },
+                )
+
+        external_probe.assert_called_once_with(
+            "genesis",
+            ".venv-genesis/bin/python",
+            pyopengl_platform="egl",
+            timeout_seconds=12,
+            extra_env=None,
+        )
+        self.assertEqual(env.physics_backend, "genesis")
+
+    def test_physics_backend_readiness_reports_genesis_external_probe_failure(self):
+        with patch.object(physics_backend_module.GenesisPhysicsBackend, "_is_genesis_available", return_value=False):
+            with patch.object(
+                physics_backend_module.GenesisPhysicsBackend,
+                "_is_genesis_available_via_external_runtime",
+                return_value=(False, "external runtime probe returned 1"),
+            ):
+                readiness = physics_backend_readiness(
+                    "genesis",
+                    options={"external_python": ".venv-genesis/bin/python"},
+                )
+
+        self.assertFalse(readiness["ready"])
+        self.assertEqual(readiness["backend"], "genesis")
+        self.assertEqual(readiness["error_type"], "ImportError")
+        self.assertIn("external_python", readiness["reason"])
+        self.assertIn("external runtime probe returned 1", readiness["reason"])
 
     def test_physics_backend_readiness_can_skip_genesis_dependency_check(self):
         with patch.object(physics_backend_module.GenesisPhysicsBackend, "_is_genesis_available", return_value=False):

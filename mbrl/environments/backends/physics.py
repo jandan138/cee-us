@@ -1,4 +1,6 @@
 import os
+import shlex
+import subprocess
 import time
 from abc import ABC
 from importlib import import_module
@@ -101,18 +103,114 @@ class GenesisPhysicsBackend(PhysicsBackend):
     def _is_genesis_available(module_name):
         return find_spec(module_name) is not None
 
+    @staticmethod
+    def _normalize_external_python_command(external_python):
+        if isinstance(external_python, str):
+            parts = shlex.split(external_python.strip())
+        elif isinstance(external_python, (list, tuple)):
+            parts = []
+            for part in external_python:
+                if part is None:
+                    continue
+                normalized_part = str(part).strip()
+                if normalized_part:
+                    parts.append(normalized_part)
+        else:
+            raise TypeError("external_python must be a command string or a list/tuple of argv parts")
+
+        if not parts:
+            raise ValueError("external_python must not be empty")
+        return parts
+
+    @classmethod
+    def _is_genesis_available_via_external_runtime(
+        cls,
+        module_name,
+        external_python,
+        *,
+        pyopengl_platform=None,
+        timeout_seconds=10.0,
+        extra_env=None,
+    ):
+        command = cls._normalize_external_python_command(external_python)
+        probe_code = (
+            "import importlib.util, sys; "
+            "module_name = sys.argv[1]; "
+            "sys.exit(0 if importlib.util.find_spec(module_name) is not None else 1)"
+        )
+        probe_command = command + ["-c", probe_code, module_name]
+
+        probe_env = dict(os.environ)
+        if extra_env is not None:
+            if not isinstance(extra_env, dict):
+                raise TypeError("external_probe_env/external_env must be a dict when provided")
+            for env_key, env_value in extra_env.items():
+                if env_value is None:
+                    continue
+                probe_env[str(env_key)] = str(env_value)
+        if pyopengl_platform not in (None, ""):
+            probe_env["PYOPENGL_PLATFORM"] = str(pyopengl_platform)
+
+        try:
+            result = subprocess.run(
+                probe_command,
+                check=False,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                env=probe_env,
+                timeout=float(timeout_seconds),
+            )
+        except subprocess.TimeoutExpired:
+            return False, f"external runtime probe timed out after {timeout_seconds}s"
+        except Exception as error:
+            return False, f"external runtime probe failed to execute: {type(error).__name__}: {error}"
+
+        if result.returncode == 0:
+            return True, "module import probe succeeded in external runtime"
+
+        probe_output = (result.stderr or "").strip() or (result.stdout or "").strip()
+        if probe_output:
+            return False, f"external runtime probe returned {result.returncode}: {probe_output}"
+        return False, f"external runtime probe returned {result.returncode}"
+
     def prepare_backend(self, options=None):
         options = options or {}
         if options.get("skip_dependency_check", False):
             return
 
         module_name = options.get("module_name", "genesis")
-        if not self._is_genesis_available(module_name):
-            raise ImportError(
-                "Physics backend 'Genesis' selected, but the 'genesis' package is not available. "
-                "Install the Genesis runtime or pass "
-                "physics_backend_options={'skip_dependency_check': true} for synthetic tests."
+        if self._is_genesis_available(module_name):
+            return
+
+        external_python = options.get("external_python")
+        external_probe_reason = ""
+        if external_python:
+            pyopengl_platform = options.get("PYOPENGL_PLATFORM", options.get("pyopengl_platform"))
+            external_probe_env = options.get("external_probe_env", options.get("external_env"))
+            timeout_seconds = options.get("external_probe_timeout_sec", 10.0)
+            available_in_external_runtime, external_probe_reason = self._is_genesis_available_via_external_runtime(
+                module_name,
+                external_python,
+                pyopengl_platform=pyopengl_platform,
+                timeout_seconds=timeout_seconds,
+                extra_env=external_probe_env,
             )
+            if available_in_external_runtime:
+                return
+
+        error_message = (
+            "Physics backend 'Genesis' selected, but the 'genesis' package is not available. "
+            "Install the Genesis runtime or pass "
+            "physics_backend_options={'skip_dependency_check': true} for synthetic tests."
+        )
+        if external_python:
+            error_message += f" External runtime probe attempted via external_python={external_python!r}"
+            if external_probe_reason:
+                error_message += f" and failed ({external_probe_reason})."
+            else:
+                error_message += " and failed."
+        raise ImportError(error_message)
 
 
 class NewtonPhysicsBackend(_UnavailablePhysicsBackend):

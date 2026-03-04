@@ -37,6 +37,9 @@ class BackendDiagnosticsTestCase(unittest.TestCase):
                 "REAL_BACKEND_SWITCH_PLUGIN_MODULES": "tests.backend_plugin_example, tests.backend_plugin_example",
                 "REAL_BACKEND_SWITCH_PHYSICS_OPTIONS_JSON": "{\"genesis\": {\"skip_dependency_check\": true}}",
                 "REAL_BACKEND_SWITCH_REQUIRE_TRUE_RUNTIME": "1",
+                "REAL_BACKEND_SWITCH_GENESIS_EXTERNAL_PYTHON": "",
+                "REAL_BACKEND_SWITCH_GENESIS_PROBE_TIMEOUT_SEC": "",
+                "REAL_BACKEND_SWITCH_GENESIS_PYOPENGL_PLATFORM": "",
             },
             clear=False,
         ):
@@ -64,16 +67,49 @@ class BackendDiagnosticsTestCase(unittest.TestCase):
             with self.assertRaises(ValueError):
                 diagnostics_module.resolve_real_backend_switch_configuration()
 
+    def test_real_switch_configuration_bridges_genesis_external_probe_env_vars(self):
+        with patch.dict(
+            os.environ,
+            {
+                "REAL_BACKEND_SWITCH_GENESIS_EXTERNAL_PYTHON": ".venv-genesis/bin/python",
+                "REAL_BACKEND_SWITCH_GENESIS_PROBE_TIMEOUT_SEC": "15",
+                "REAL_BACKEND_SWITCH_GENESIS_PYOPENGL_PLATFORM": "egl",
+            },
+            clear=False,
+        ):
+            config = diagnostics_module.resolve_real_backend_switch_configuration()
+
+        genesis_options = config["options_by_backend"]["genesis"]
+        self.assertEqual(genesis_options["external_python"], ".venv-genesis/bin/python")
+        self.assertEqual(genesis_options["external_probe_timeout_sec"], 15.0)
+        self.assertEqual(genesis_options["PYOPENGL_PLATFORM"], "egl")
+
+    def test_real_switch_configuration_rejects_invalid_genesis_probe_timeout(self):
+        with patch.dict(
+            os.environ,
+            {"REAL_BACKEND_SWITCH_GENESIS_PROBE_TIMEOUT_SEC": "0"},
+            clear=False,
+        ):
+            with self.assertRaises(ValueError):
+                diagnostics_module.resolve_real_backend_switch_configuration()
+
     def test_collect_backend_diagnostics_allows_real_switch_option_overrides(self):
-        report = diagnostics_module.collect_backend_diagnostics(
-            backend_names=["genesis"],
-            real_switch_options_by_backend={"genesis": {"skip_dependency_check": True}},
-        )
+        with patch.dict(
+            os.environ,
+            {
+                "REAL_BACKEND_SWITCH_GENESIS_EXTERNAL_PYTHON": "",
+                "REAL_BACKEND_SWITCH_GENESIS_PROBE_TIMEOUT_SEC": "",
+                "REAL_BACKEND_SWITCH_GENESIS_PYOPENGL_PLATFORM": "",
+            },
+            clear=False,
+        ):
+            report = diagnostics_module.collect_backend_diagnostics(
+                backend_names=["genesis"],
+                real_switch_options_by_backend={"genesis": {"skip_dependency_check": True}},
+            )
         real_switch = report["real_backend_switch_test"]
-        self.assertEqual(
-            real_switch["configured_physics_options_by_backend"].get("genesis"),
-            {"skip_dependency_check": True},
-        )
+        genesis_options = real_switch["configured_physics_options_by_backend"].get("genesis")
+        self.assertEqual(genesis_options.get("skip_dependency_check"), True)
 
     def test_real_switch_reports_candidate_runtime_mode(self):
         register_env_backend(
@@ -122,6 +158,26 @@ class BackendDiagnosticsTestCase(unittest.TestCase):
                 diagnostics_module.main(["--real-switch-require-true-runtime", "--json"])
 
         self.assertTrue(collect_fn.call_args.kwargs["real_switch_require_true_runtime"])
+
+    def test_diagnostics_cli_accepts_genesis_external_probe_flags(self):
+        with patch.object(diagnostics_module, "collect_backend_diagnostics", return_value={"ok": True}) as collect_fn:
+            with patch("builtins.print"):
+                diagnostics_module.main(
+                    [
+                        "--real-switch-genesis-external-python",
+                        ".venv-genesis/bin/python",
+                        "--real-switch-genesis-probe-timeout-sec",
+                        "12",
+                        "--real-switch-genesis-pyopengl-platform",
+                        "egl",
+                        "--json",
+                    ]
+                )
+
+        kwargs = collect_fn.call_args.kwargs
+        self.assertEqual(kwargs["real_switch_genesis_external_python"], ".venv-genesis/bin/python")
+        self.assertEqual(kwargs["real_switch_genesis_probe_timeout_sec"], 12.0)
+        self.assertEqual(kwargs["real_switch_genesis_pyopengl_platform"], "egl")
 
     def test_unified_switch_readiness_reports_missing_env_mapping(self):
         self._require_unified_switch_api()

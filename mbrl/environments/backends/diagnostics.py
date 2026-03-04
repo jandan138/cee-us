@@ -11,6 +11,9 @@ REAL_SWITCH_TEST_ENV_VAR = "ENABLE_REAL_BACKEND_TESTS"
 REAL_SWITCH_TEST_PLUGIN_MODULES_ENV_VAR = "REAL_BACKEND_SWITCH_PLUGIN_MODULES"
 REAL_SWITCH_TEST_PHYSICS_OPTIONS_ENV_VAR = "REAL_BACKEND_SWITCH_PHYSICS_OPTIONS_JSON"
 REAL_SWITCH_TEST_REQUIRE_TRUE_RUNTIME_ENV_VAR = "REAL_BACKEND_SWITCH_REQUIRE_TRUE_RUNTIME"
+REAL_SWITCH_TEST_GENESIS_EXTERNAL_PYTHON_ENV_VAR = "REAL_BACKEND_SWITCH_GENESIS_EXTERNAL_PYTHON"
+REAL_SWITCH_TEST_GENESIS_PROBE_TIMEOUT_SEC_ENV_VAR = "REAL_BACKEND_SWITCH_GENESIS_PROBE_TIMEOUT_SEC"
+REAL_SWITCH_TEST_GENESIS_PYOPENGL_PLATFORM_ENV_VAR = "REAL_BACKEND_SWITCH_GENESIS_PYOPENGL_PLATFORM"
 
 
 def _normalize_backend_names(backend_names):
@@ -80,6 +83,65 @@ def _normalize_bool_flag(flag_value, *, option_name):
     raise ValueError(f"{option_name} must be one of: 1/0, true/false, yes/no, on/off.")
 
 
+def _normalize_optional_timeout_seconds(timeout_value, *, option_name):
+    if timeout_value is None:
+        return None
+    if isinstance(timeout_value, (int, float)):
+        normalized = float(timeout_value)
+    else:
+        raw = str(timeout_value).strip()
+        if not raw:
+            return None
+        try:
+            normalized = float(raw)
+        except ValueError as error:
+            raise ValueError(f"{option_name} must be a positive number.") from error
+
+    if normalized <= 0:
+        raise ValueError(f"{option_name} must be > 0.")
+    return normalized
+
+
+def _merge_genesis_external_probe_options(
+    options_by_backend,
+    *,
+    external_python=None,
+    probe_timeout_seconds=None,
+    pyopengl_platform=None,
+):
+    resolved_external_python = None if external_python is None else str(external_python).strip()
+    if resolved_external_python == "":
+        resolved_external_python = None
+    resolved_pyopengl_platform = None if pyopengl_platform is None else str(pyopengl_platform).strip()
+    if resolved_pyopengl_platform == "":
+        resolved_pyopengl_platform = None
+    resolved_timeout = _normalize_optional_timeout_seconds(
+        probe_timeout_seconds,
+        option_name=REAL_SWITCH_TEST_GENESIS_PROBE_TIMEOUT_SEC_ENV_VAR,
+    )
+
+    if resolved_external_python is None and resolved_timeout is None and resolved_pyopengl_platform is None:
+        return options_by_backend
+
+    merged = dict(options_by_backend or {})
+    genesis_options = dict(merged.get("genesis", {}))
+
+    if resolved_external_python is not None and "external_python" not in genesis_options:
+        genesis_options["external_python"] = resolved_external_python
+    if resolved_timeout is not None and "external_probe_timeout_sec" not in genesis_options:
+        genesis_options["external_probe_timeout_sec"] = resolved_timeout
+    if (
+        resolved_pyopengl_platform is not None
+        and "PYOPENGL_PLATFORM" not in genesis_options
+        and "pyopengl_platform" not in genesis_options
+    ):
+        genesis_options["PYOPENGL_PLATFORM"] = resolved_pyopengl_platform
+
+    if genesis_options:
+        merged["genesis"] = genesis_options
+    return merged
+
+
 def _classify_runtime_mode(candidate_options):
     options = candidate_options or {}
     if bool(options.get("skip_dependency_check", False)):
@@ -92,6 +154,9 @@ def resolve_real_backend_switch_configuration(
     backend_plugin_modules=None,
     options_by_backend=None,
     require_true_runtime=None,
+    genesis_external_python=None,
+    genesis_probe_timeout_sec=None,
+    genesis_pyopengl_platform=None,
 ):
     configured_plugin_modules = (
         backend_plugin_modules
@@ -108,9 +173,31 @@ def resolve_real_backend_switch_configuration(
         if require_true_runtime is not None
         else os.environ.get(REAL_SWITCH_TEST_REQUIRE_TRUE_RUNTIME_ENV_VAR, "0")
     )
+    configured_genesis_external_python = (
+        genesis_external_python
+        if genesis_external_python is not None
+        else os.environ.get(REAL_SWITCH_TEST_GENESIS_EXTERNAL_PYTHON_ENV_VAR, "")
+    )
+    configured_genesis_probe_timeout_sec = (
+        genesis_probe_timeout_sec
+        if genesis_probe_timeout_sec is not None
+        else os.environ.get(REAL_SWITCH_TEST_GENESIS_PROBE_TIMEOUT_SEC_ENV_VAR, "")
+    )
+    configured_genesis_pyopengl_platform = (
+        genesis_pyopengl_platform
+        if genesis_pyopengl_platform is not None
+        else os.environ.get(REAL_SWITCH_TEST_GENESIS_PYOPENGL_PLATFORM_ENV_VAR, "")
+    )
+    resolved_options_by_backend = _normalize_options_by_backend(configured_options)
+    resolved_options_by_backend = _merge_genesis_external_probe_options(
+        resolved_options_by_backend,
+        external_python=configured_genesis_external_python,
+        probe_timeout_seconds=configured_genesis_probe_timeout_sec,
+        pyopengl_platform=configured_genesis_pyopengl_platform,
+    )
     return {
         "backend_plugin_modules": _normalize_real_switch_plugin_modules(configured_plugin_modules),
-        "options_by_backend": _normalize_options_by_backend(configured_options),
+        "options_by_backend": resolved_options_by_backend,
         "require_true_runtime": _normalize_bool_flag(
             configured_require_true_runtime,
             option_name=REAL_SWITCH_TEST_REQUIRE_TRUE_RUNTIME_ENV_VAR,
@@ -279,11 +366,17 @@ def diagnose_real_backend_switch_test(
     options_by_backend=None,
     backend_plugin_modules=None,
     require_true_runtime=None,
+    genesis_external_python=None,
+    genesis_probe_timeout_sec=None,
+    genesis_pyopengl_platform=None,
 ):
     config = resolve_real_backend_switch_configuration(
         backend_plugin_modules=backend_plugin_modules,
         options_by_backend=options_by_backend,
         require_true_runtime=require_true_runtime,
+        genesis_external_python=genesis_external_python,
+        genesis_probe_timeout_sec=genesis_probe_timeout_sec,
+        genesis_pyopengl_platform=genesis_pyopengl_platform,
     )
     configured_plugin_modules = config["backend_plugin_modules"]
     resolved_options_by_backend = config["options_by_backend"]
@@ -403,6 +496,18 @@ def diagnose_real_backend_switch_test(
             "name": REAL_SWITCH_TEST_PHYSICS_OPTIONS_ENV_VAR,
             "value": os.environ.get(REAL_SWITCH_TEST_PHYSICS_OPTIONS_ENV_VAR, ""),
         },
+        "genesis_external_python_env_var": {
+            "name": REAL_SWITCH_TEST_GENESIS_EXTERNAL_PYTHON_ENV_VAR,
+            "value": os.environ.get(REAL_SWITCH_TEST_GENESIS_EXTERNAL_PYTHON_ENV_VAR, ""),
+        },
+        "genesis_probe_timeout_sec_env_var": {
+            "name": REAL_SWITCH_TEST_GENESIS_PROBE_TIMEOUT_SEC_ENV_VAR,
+            "value": os.environ.get(REAL_SWITCH_TEST_GENESIS_PROBE_TIMEOUT_SEC_ENV_VAR, ""),
+        },
+        "genesis_pyopengl_platform_env_var": {
+            "name": REAL_SWITCH_TEST_GENESIS_PYOPENGL_PLATFORM_ENV_VAR,
+            "value": os.environ.get(REAL_SWITCH_TEST_GENESIS_PYOPENGL_PLATFORM_ENV_VAR, ""),
+        },
         "require_true_runtime_flag": {
             "name": REAL_SWITCH_TEST_REQUIRE_TRUE_RUNTIME_ENV_VAR,
             "value": require_true_runtime_raw,
@@ -437,6 +542,9 @@ def collect_backend_diagnostics(
     real_switch_backend_plugin_modules=None,
     real_switch_options_by_backend=None,
     real_switch_require_true_runtime=None,
+    real_switch_genesis_external_python=None,
+    real_switch_genesis_probe_timeout_sec=None,
+    real_switch_genesis_pyopengl_platform=None,
     env_name=None,
     physics_backend_name=None,
     render_backend_name=None,
@@ -455,6 +563,9 @@ def collect_backend_diagnostics(
             backend_plugin_modules=real_switch_backend_plugin_modules,
             options_by_backend=resolved_real_switch_options,
             require_true_runtime=real_switch_require_true_runtime,
+            genesis_external_python=real_switch_genesis_external_python,
+            genesis_probe_timeout_sec=real_switch_genesis_probe_timeout_sec,
+            genesis_pyopengl_platform=real_switch_genesis_pyopengl_platform,
         ),
     }
     if env_name is not None:
@@ -498,6 +609,15 @@ def _format_text_report(report):
     )
     lines.append(
         f"- Configured plugin modules: {real_switch['configured_backend_plugin_modules'] or 'none'}"
+    )
+    lines.append(
+        "- Genesis external runtime bridge env: "
+        + f"{real_switch['genesis_external_python_env_var']['name']}="
+        + f"{real_switch['genesis_external_python_env_var']['value'] or '<unset>'}, "
+        + f"{real_switch['genesis_probe_timeout_sec_env_var']['name']}="
+        + f"{real_switch['genesis_probe_timeout_sec_env_var']['value'] or '<unset>'}, "
+        + f"{real_switch['genesis_pyopengl_platform_env_var']['name']}="
+        + f"{real_switch['genesis_pyopengl_platform_env_var']['value'] or '<unset>'}"
     )
     lines.append(
         f"- Loaded plugin modules: {real_switch['loaded_backend_plugin_modules'] or 'none'}"
@@ -648,6 +768,31 @@ def _parse_args(argv=None):
         ),
     )
     parser.add_argument(
+        "--real-switch-genesis-external-python",
+        default=None,
+        help=(
+            "External Python executable for Genesis readiness probe when local runtime cannot import genesis. "
+            f"Equivalent to {REAL_SWITCH_TEST_GENESIS_EXTERNAL_PYTHON_ENV_VAR}."
+        ),
+    )
+    parser.add_argument(
+        "--real-switch-genesis-probe-timeout-sec",
+        type=float,
+        default=None,
+        help=(
+            "Timeout seconds for Genesis external readiness probe. "
+            f"Equivalent to {REAL_SWITCH_TEST_GENESIS_PROBE_TIMEOUT_SEC_ENV_VAR}."
+        ),
+    )
+    parser.add_argument(
+        "--real-switch-genesis-pyopengl-platform",
+        default=None,
+        help=(
+            "Value injected as PYOPENGL_PLATFORM for Genesis external readiness probe. "
+            f"Equivalent to {REAL_SWITCH_TEST_GENESIS_PYOPENGL_PLATFORM_ENV_VAR}."
+        ),
+    )
+    parser.add_argument(
         "--json",
         action="store_true",
         help="Print diagnostics as JSON.",
@@ -684,6 +829,9 @@ def main(argv=None):
         real_switch_backend_plugin_modules=args.real_switch_plugin_modules,
         real_switch_options_by_backend=real_switch_options_by_backend,
         real_switch_require_true_runtime=args.real_switch_require_true_runtime,
+        real_switch_genesis_external_python=args.real_switch_genesis_external_python,
+        real_switch_genesis_probe_timeout_sec=args.real_switch_genesis_probe_timeout_sec,
+        real_switch_genesis_pyopengl_platform=args.real_switch_genesis_pyopengl_platform,
         env_name=args.env,
         physics_backend_name=tuple_backend_name,
         render_backend_name=args.render_backend,
