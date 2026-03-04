@@ -2,6 +2,7 @@ import os
 import time
 from abc import ABC
 from importlib import import_module
+from importlib.util import find_spec
 
 
 class PhysicsBackend(ABC):
@@ -91,9 +92,27 @@ class IsaacSimPhysicsBackend(_UnavailablePhysicsBackend):
     display_name = "Isaac Sim"
 
 
-class GenesisPhysicsBackend(_UnavailablePhysicsBackend):
+class GenesisPhysicsBackend(PhysicsBackend):
     backend_name = "genesis"
     display_name = "Genesis"
+    implemented = True
+
+    @staticmethod
+    def _is_genesis_available(module_name):
+        return find_spec(module_name) is not None
+
+    def prepare_backend(self, options=None):
+        options = options or {}
+        if options.get("skip_dependency_check", False):
+            return
+
+        module_name = options.get("module_name", "genesis")
+        if not self._is_genesis_available(module_name):
+            raise ImportError(
+                "Physics backend 'Genesis' selected, but the 'genesis' package is not available. "
+                "Install the Genesis runtime or pass "
+                "physics_backend_options={'skip_dependency_check': true} for synthetic tests."
+            )
 
 
 class NewtonPhysicsBackend(_UnavailablePhysicsBackend):

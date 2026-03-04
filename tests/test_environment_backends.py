@@ -197,6 +197,38 @@ class EnvironmentBackendsTestCase(unittest.TestCase):
         env = env_from_string(env_name, physics_backend=backend_name, render_backend="none")
         self.assertEqual(env.physics_backend, backend_name)
 
+    def test_genesis_backend_can_switch_when_mapped_and_dependency_check_skipped(self):
+        register_env_backend(
+            "GenesisDummyEnv",
+            "genesis",
+            "mbrl.environments.testsupport_dummy_env",
+            "DummyTestEnv",
+            overwrite=True,
+        )
+        env = env_from_string(
+            "GenesisDummyEnv",
+            physics_backend="genesis",
+            render_backend="none",
+            physics_backend_options={"skip_dependency_check": True},
+        )
+        self.assertEqual(env.physics_backend, "genesis")
+
+    def test_genesis_backend_requires_dependency_by_default(self):
+        register_env_backend(
+            "GenesisDependencyEnv",
+            "genesis",
+            "mbrl.environments.testsupport_dummy_env",
+            "DummyTestEnv",
+            overwrite=True,
+        )
+        with self.assertRaises(ImportError) as error:
+            env_from_string(
+                "GenesisDependencyEnv",
+                physics_backend="genesis",
+                render_backend="none",
+            )
+        self.assertIn("Genesis", str(error.exception))
+
 
 if __name__ == "__main__":
     unittest.main()
