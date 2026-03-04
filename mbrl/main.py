@@ -49,7 +49,21 @@ def main(params):
     save_settings_to_json(params_copy, params.working_dir)
     #
 
-    env = env_from_string(params.env, **params.env_params)
+    env_params = (
+        params.env_params._mutable_copy()
+        if hasattr(params.env_params, "_mutable_copy")
+        else dict(params.env_params)
+    )
+    for backend_key in (
+        "physics_backend",
+        "render_backend",
+        "physics_backend_options",
+        "render_backend_options",
+    ):
+        if backend_key in params:
+            env_params[backend_key] = params[backend_key]
+
+    env = env_from_string(params.env, **env_params)
 
     forward_model = (
         None

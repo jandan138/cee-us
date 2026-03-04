@@ -11,6 +11,7 @@ from mbrl.environments.abstract_environments import (
     GroundTruthSupportEnv,
     RealRobotEnvInterface,
 )
+from mbrl.environments.backends import dispatch_render
 from mbrl.models.abstract_models import EnsembleModel
 from mbrl.rolloutbuffer import RolloutBuffer
 
@@ -105,7 +106,7 @@ class ModelBasedController(Controller, ABC):
             pass
         if isinstance(self.env, RealRobotEnvInterface) and self.env.supports_live_rendering:
             if self.do_visualize_plan == "last":
-                self.env.render(plan=obs[0, -1].cpu().detach().numpy())
+                dispatch_render(self.env, plan=obs[0, -1].cpu().detach().numpy())
             else:
                 raise NotImplementedError()
 
@@ -117,7 +118,7 @@ class ModelBasedController(Controller, ABC):
             if self.do_visualize_plan == "last":
                 self.visualize_env.set_state_from_observation(obs[0, -1].cpu().detach().numpy())
                 self.visualize_env.step(acts[0, -1].cpu().detach().numpy())
-                self.visualize_env.render()
+                dispatch_render(self.visualize_env)
             elif self.do_visualize_plan == "all":
                 # print("State at visual ", state)
                 _obs = obs
@@ -147,7 +148,7 @@ class ModelBasedController(Controller, ABC):
                     #     print(f"orig: ", obs[i + 1])
                     #     print(f"simu: ", new_obs)
 
-                    self.visualize_env.render()
+                    dispatch_render(self.visualize_env)
                     time.sleep(1.0 / 25.0)
             else:
                 raise AttributeError("unknown mode for do_visualize_plan: Options: None, 'last','all'")

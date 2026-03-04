@@ -16,6 +16,7 @@ from mbrl.environments.abstract_environments import (
     GroundTruthSupportEnv,
     RealRobotEnvInterface,
 )
+from mbrl.environments.backends import dispatch_render
 from mbrl.helpers import hook_executer, tqdm_context
 from mbrl.parallel_utils import CloudPickleWrapper, clear_mpi_env_vars
 from mbrl.rolloutbuffer import Rollout
@@ -291,7 +292,7 @@ class RolloutManager:
 
                 if render:
                     if video is not None:
-                        frame = env.render(mode="rgb_array")
+                        frame = dispatch_render(env, mode="rgb_array")
                         video.append_data(frame)
 
                         # Workaround to render when recording. Just open
@@ -300,7 +301,7 @@ class RolloutManager:
                         video_frame_file = f"{os.path.splitext(video_path)[0]}.png"
                         img.save(video_frame_file)
                     else:
-                        env.render()
+                        dispatch_render(env)
 
                 if only_final_reward and t < (task_horizon - 1):
                     rew = 0

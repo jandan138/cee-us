@@ -1,5 +1,8 @@
 env: "FetchPickAndPlaceConstruction"
 env_params:
+  # Backend selectors (default keeps current behavior).
+  physics_backend: "mujoco"
+  render_backend: "native"
   sparse: false
   shaped_reward: true
   num_blocks: 4
@@ -7,4 +10,3 @@ env_params:
   case: "Singletower"
   visualize_target: false
   visualize_mocap: false
-
