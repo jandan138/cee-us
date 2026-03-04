@@ -2,6 +2,7 @@ import copy
 import importlib
 import os
 from concurrent.futures import ThreadPoolExecutor
+from unittest.mock import patch
 import unittest
 
 from mbrl.environments import env_from_string
@@ -12,6 +13,7 @@ from mbrl.environments.backends import (
     list_physics_backends,
     load_backend_plugins,
     normalize_plugin_modules,
+    physics_backend_readiness,
     register_env_backend,
     reset_loaded_backend_plugins,
 )
@@ -228,6 +230,23 @@ class EnvironmentBackendsTestCase(unittest.TestCase):
                 render_backend="none",
             )
         self.assertIn("Genesis", str(error.exception))
+
+    def test_physics_backend_readiness_reports_genesis_missing_dependency(self):
+        with patch.object(physics_backend_module.GenesisPhysicsBackend, "_is_genesis_available", return_value=False):
+            readiness = physics_backend_readiness("genesis")
+
+        self.assertFalse(readiness["ready"])
+        self.assertEqual(readiness["backend"], "genesis")
+        self.assertEqual(readiness["error_type"], "ImportError")
+        self.assertIn("Genesis", readiness["reason"])
+
+    def test_physics_backend_readiness_can_skip_genesis_dependency_check(self):
+        with patch.object(physics_backend_module.GenesisPhysicsBackend, "_is_genesis_available", return_value=False):
+            readiness = physics_backend_readiness("genesis", options={"skip_dependency_check": True})
+
+        self.assertTrue(readiness["ready"])
+        self.assertEqual(readiness["backend"], "genesis")
+        self.assertEqual(readiness["error_type"], None)
 
 
 if __name__ == "__main__":

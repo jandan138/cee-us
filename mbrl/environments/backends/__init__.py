@@ -1,6 +1,7 @@
 from .physics import (
     available_physics_backends,
     list_physics_backends,
+    physics_backend_readiness,
     physics_backend_from_string,
     register_physics_backend,
 )
@@ -21,6 +22,7 @@ __all__ = [
     "available_render_backends",
     "dispatch_render",
     "list_physics_backends",
+    "physics_backend_readiness",
     "list_render_backends",
     "load_backend_plugins",
     "reset_loaded_backend_plugins",

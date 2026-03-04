@@ -155,6 +155,40 @@ def list_physics_backends():
     return info
 
 
+def physics_backend_readiness(backend_name, options=None):
+    readiness = {
+        "backend": backend_name,
+        "ready": False,
+        "error_type": None,
+        "reason": "",
+    }
+    try:
+        backend = physics_backend_from_string(backend_name)
+    except Exception as error:
+        readiness["error_type"] = type(error).__name__
+        readiness["reason"] = str(error)
+        return readiness
+
+    readiness["backend"] = backend.backend_name
+    if not bool(getattr(backend, "implemented", False)):
+        readiness["error_type"] = "NotImplementedError"
+        readiness["reason"] = (
+            f"Physics backend '{backend.display_name or backend.backend_name}' is registered but not implemented."
+        )
+        return readiness
+
+    backend.configure(options=options or {})
+    try:
+        backend.prepare_backend(options=backend.options)
+    except Exception as error:
+        readiness["error_type"] = type(error).__name__
+        readiness["reason"] = str(error)
+        return readiness
+
+    readiness["ready"] = True
+    return readiness
+
+
 def register_physics_backend(backend_name, backend_cls, *, aliases=None, override=False):
     normalized = (backend_name or "").strip().lower()
     if not normalized:
