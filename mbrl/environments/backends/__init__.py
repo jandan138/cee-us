@@ -34,6 +34,18 @@ def collect_backend_diagnostics(*args, **kwargs):
     return _collect_backend_diagnostics(*args, **kwargs)
 
 
+def render_backend_readiness(*args, **kwargs):
+    from .diagnostics import render_backend_readiness as _render_backend_readiness
+
+    return _render_backend_readiness(*args, **kwargs)
+
+
+def diagnose_unified_switch_readiness(*args, **kwargs):
+    from .diagnostics import diagnose_unified_switch_readiness as _diagnose_unified_switch_readiness
+
+    return _diagnose_unified_switch_readiness(*args, **kwargs)
+
+
 __all__ = [
     "ENV_REGISTRY",
     "available_env_backends",
@@ -45,6 +57,8 @@ __all__ = [
     "collect_physics_backend_readiness",
     "diagnose_real_backend_switch_test",
     "collect_backend_diagnostics",
+    "render_backend_readiness",
+    "diagnose_unified_switch_readiness",
     "list_render_backends",
     "load_backend_plugins",
     "reset_loaded_backend_plugins",

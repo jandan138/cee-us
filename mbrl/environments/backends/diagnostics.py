@@ -4,6 +4,7 @@ import os
 
 from .physics import list_physics_backends, physics_backend_readiness
 from .registry import ENV_REGISTRY
+from .render import render_backend_from_string
 
 REAL_SWITCH_TEST_ENV_VAR = "ENABLE_REAL_BACKEND_TESTS"
 
@@ -34,6 +35,117 @@ def collect_physics_backend_readiness(backend_names=None, *, options_by_backend=
             options=options_by_backend.get(backend_name),
         )
     return readiness
+
+
+def render_backend_readiness(backend_name):
+    readiness = {
+        "backend": backend_name,
+        "ready": False,
+        "implemented": False,
+        "error_type": None,
+        "reason": "",
+    }
+    try:
+        backend = render_backend_from_string(backend_name)
+    except Exception as error:
+        readiness["error_type"] = type(error).__name__
+        readiness["reason"] = str(error)
+        return readiness
+
+    readiness["backend"] = backend.backend_name
+    readiness["implemented"] = bool(getattr(backend, "implemented", False))
+    if not readiness["implemented"]:
+        readiness["error_type"] = "NotImplementedError"
+        readiness["reason"] = (
+            f"Render backend '{backend.display_name or backend.backend_name}' is registered but not implemented."
+        )
+        return readiness
+
+    readiness["ready"] = True
+    return readiness
+
+
+def diagnose_unified_switch_readiness(
+    env_name,
+    *,
+    physics_backend_name="mujoco",
+    render_backend_name="native",
+    physics_backend_options=None,
+):
+    physics_backend_name = physics_backend_name or "mujoco"
+    render_backend_name = render_backend_name or "native"
+
+    physics_readiness = physics_backend_readiness(
+        physics_backend_name,
+        options=physics_backend_options or {},
+    )
+    resolved_physics_backend = physics_readiness.get("backend") or physics_backend_name
+    render_readiness = render_backend_readiness(render_backend_name)
+
+    env_mapping = {
+        "env_name": env_name,
+        "physics_backend": resolved_physics_backend,
+        "exists": False,
+        "error_type": None,
+        "reason": "",
+        "available_backends": [],
+        "target": None,
+    }
+    if not env_name:
+        env_mapping["error_type"] = "ValueError"
+        env_mapping["reason"] = "env_name must be non-empty for unified switch readiness diagnostics."
+    elif env_name not in ENV_REGISTRY:
+        env_mapping["error_type"] = "KeyError"
+        env_mapping["reason"] = f"Env '{env_name}' is not registered in ENV_REGISTRY."
+    else:
+        backend_entries = ENV_REGISTRY[env_name]
+        env_mapping["available_backends"] = sorted(backend_entries.keys())
+        if resolved_physics_backend not in backend_entries:
+            env_mapping["error_type"] = "NotImplementedError"
+            env_mapping["reason"] = (
+                f"Env '{env_name}' has no mapping for physics backend '{resolved_physics_backend}'."
+            )
+        else:
+            module_path, class_name = backend_entries[resolved_physics_backend]
+            env_mapping["exists"] = True
+            env_mapping["target"] = {
+                "module_path": module_path,
+                "class_name": class_name,
+            }
+
+    overall_ready = (
+        bool(physics_readiness.get("ready", False))
+        and bool(render_readiness.get("ready", False))
+        and bool(env_mapping.get("exists", False))
+    )
+    next_actions = []
+    if not physics_readiness.get("ready", False):
+        next_actions.append(
+            "Fix physics backend readiness first (dependency or implementation), then retry tuple diagnostics."
+        )
+    if not render_readiness.get("ready", False):
+        next_actions.append(
+            "Use an implemented render backend (e.g. native/headless/none) or register a concrete render plugin."
+        )
+    if not env_mapping.get("exists", False):
+        next_actions.append("Add or register ENV_REGISTRY mapping for the selected env and physics backend.")
+
+    return {
+        "requested": {
+            "env_name": env_name,
+            "physics_backend": physics_backend_name,
+            "render_backend": render_backend_name,
+        },
+        "resolved": {
+            "physics_backend": resolved_physics_backend,
+            "render_backend": render_readiness.get("backend"),
+        },
+        "physics_backend_readiness": physics_readiness,
+        "render_backend_readiness": render_readiness,
+        "env_mapping": env_mapping,
+        "ready": overall_ready,
+        "next_actions": next_actions,
+    }
 
 
 def diagnose_real_backend_switch_test(*, enable_real_backend_tests=None, options_by_backend=None):
@@ -107,9 +219,17 @@ def diagnose_real_backend_switch_test(*, enable_real_backend_tests=None, options
     }
 
 
-def collect_backend_diagnostics(backend_names=None, *, enable_real_backend_tests=None, options_by_backend=None):
+def collect_backend_diagnostics(
+    backend_names=None,
+    *,
+    enable_real_backend_tests=None,
+    options_by_backend=None,
+    env_name=None,
+    physics_backend_name=None,
+    render_backend_name=None,
+):
     options_by_backend = options_by_backend or {}
-    return {
+    report = {
         "physics_backend_readiness": collect_physics_backend_readiness(
             backend_names=backend_names,
             options_by_backend=options_by_backend,
@@ -119,6 +239,15 @@ def collect_backend_diagnostics(backend_names=None, *, enable_real_backend_tests
             options_by_backend=options_by_backend,
         ),
     }
+    if env_name is not None:
+        tuple_backend_name = physics_backend_name or "mujoco"
+        report["unified_switch_readiness"] = diagnose_unified_switch_readiness(
+            env_name,
+            physics_backend_name=tuple_backend_name,
+            render_backend_name=render_backend_name or "native",
+            physics_backend_options=options_by_backend.get(tuple_backend_name),
+        )
+    return report
 
 
 def _format_text_report(report):
@@ -173,6 +302,54 @@ def _format_text_report(report):
         lines.append("- Suggested next actions:")
         for action in real_switch["next_actions"]:
             lines.append(f"  - {action}")
+
+    unified = report.get("unified_switch_readiness")
+    if unified is not None:
+        lines.append("")
+        lines.append("Unified switch readiness (env/backend/render):")
+        requested = unified["requested"]
+        resolved = unified["resolved"]
+        lines.append(
+            "- Requested tuple: "
+            + f"{requested['env_name']} / {requested['physics_backend']} / {requested['render_backend']}"
+        )
+        lines.append(
+            "- Resolved tuple: "
+            + f"{requested['env_name']} / {resolved['physics_backend']} / {resolved['render_backend']}"
+        )
+
+        tuple_physics = unified["physics_backend_readiness"]
+        tuple_physics_status = "READY" if tuple_physics.get("ready") else "NOT READY"
+        physics_line = f"- Physics backend readiness: {tuple_physics_status}"
+        if not tuple_physics.get("ready"):
+            physics_line += f" ({tuple_physics.get('error_type')}: {tuple_physics.get('reason')})"
+        lines.append(physics_line)
+
+        tuple_render = unified["render_backend_readiness"]
+        tuple_render_status = "READY" if tuple_render.get("ready") else "NOT READY"
+        render_line = (
+            "- Render backend readiness: "
+            + f"{tuple_render_status} (implemented={tuple_render.get('implemented', False)})"
+        )
+        if not tuple_render.get("ready"):
+            render_line += f" ({tuple_render.get('error_type')}: {tuple_render.get('reason')})"
+        lines.append(render_line)
+
+        env_mapping = unified["env_mapping"]
+        mapping_state = "FOUND" if env_mapping.get("exists") else "MISSING"
+        mapping_line = f"- Env mapping status: {mapping_state}"
+        if env_mapping.get("exists"):
+            target = env_mapping.get("target") or {}
+            mapping_line += f" ({target.get('module_path')}, {target.get('class_name')})"
+        else:
+            mapping_line += f" ({env_mapping.get('error_type')}: {env_mapping.get('reason')})"
+        lines.append(mapping_line)
+        lines.append(f"- Overall tuple readiness: {'READY' if unified.get('ready') else 'NOT READY'}")
+
+        if unified["next_actions"]:
+            lines.append("- Tuple suggested next actions:")
+            for action in unified["next_actions"]:
+                lines.append(f"  - {action}")
     return "\n".join(lines)
 
 
@@ -188,6 +365,21 @@ def _parse_args(argv=None):
         help="Backend name to probe (repeatable). Default: all registered physics backends.",
     )
     parser.add_argument(
+        "--env",
+        default=None,
+        help="Env name for unified tuple readiness diagnostics.",
+    )
+    parser.add_argument(
+        "--physics-backend",
+        default=None,
+        help="Physics backend for unified tuple readiness diagnostics. Default: mujoco.",
+    )
+    parser.add_argument(
+        "--render-backend",
+        default=None,
+        help="Render backend for unified tuple readiness diagnostics. Default: native.",
+    )
+    parser.add_argument(
         "--skip-genesis-dependency-check",
         action="store_true",
         help="Probe Genesis readiness with skip_dependency_check=true (synthetic readiness).",
@@ -197,19 +389,32 @@ def _parse_args(argv=None):
         action="store_true",
         help="Print diagnostics as JSON.",
     )
-    return parser.parse_args(argv)
+    return parser, parser.parse_args(argv)
 
 
 def main(argv=None):
-    args = _parse_args(argv)
+    parser, args = _parse_args(argv)
 
     options_by_backend = {}
     if args.skip_genesis_dependency_check:
         options_by_backend["genesis"] = {"skip_dependency_check": True}
 
+    tuple_backend_name = args.physics_backend
+    if args.env is not None:
+        normalized_backends = _normalize_backend_names(args.backends)
+        if tuple_backend_name is None and len(normalized_backends) == 1:
+            tuple_backend_name = normalized_backends[0]
+        if tuple_backend_name is None and len(normalized_backends) > 1:
+            parser.error("When --env is set with multiple --backend values, please set --physics-backend explicitly.")
+        if tuple_backend_name is None:
+            tuple_backend_name = "mujoco"
+
     report = collect_backend_diagnostics(
         backend_names=args.backends,
         options_by_backend=options_by_backend,
+        env_name=args.env,
+        physics_backend_name=tuple_backend_name,
+        render_backend_name=args.render_backend,
     )
 
     if args.json:
