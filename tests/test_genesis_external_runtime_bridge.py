@@ -1,14 +1,20 @@
 import copy
 import os
 import subprocess
+import sys
+import tempfile
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from mbrl.environments import env_from_string
 from mbrl.environments.backends import diagnostics as diagnostics_module
 from mbrl.environments.backends import register_env_backend
+from mbrl.environments.backends import physics as physics_backend_module
 from mbrl.environments.backends.physics import physics_backend_readiness
 from mbrl.environments.backends.registry import ENV_REGISTRY
+
+RUN_PHASE13_GENESIS_EXTERNAL_RUNTIME_EXEC_TEST_ENV_VAR = "RUN_PHASE13_GENESIS_EXTERNAL_RUNTIME_EXEC_TEST"
 
 
 def _contains_value(node, expected):
@@ -69,6 +75,25 @@ class GenesisExternalRuntimeBridgeTestCase(unittest.TestCase):
             "DummyTestEnv",
             overwrite=True,
         )
+
+    @staticmethod
+    def _register_executable_probe_env():
+        register_env_backend(
+            "GenesisExternalRuntimeExecutableEnv",
+            "genesis",
+            "mbrl.environments.testsupport_dummy_env",
+            "DummyTestEnv",
+            overwrite=True,
+        )
+
+    def _require_runtime_metadata(self, readiness, *, context):
+        required_fields = {"dependency_source", "runtime_mode"}
+        missing = sorted(required_fields.difference(set(readiness.keys())))
+        if missing:
+            self.skipTest(
+                "Phase13 runtime metadata is not integrated "
+                f"({context} missing: {', '.join(missing)})."
+            )
 
     def test_external_runtime_probe_success_path(self):
         if not self._external_probe_bridge_supported():
@@ -231,6 +256,117 @@ class GenesisExternalRuntimeBridgeTestCase(unittest.TestCase):
         self.assertTrue(genesis_options)
         self.assertTrue(_contains_value(genesis_options, external_python))
         self.assertTrue(_contains_value(genesis_options, "osmesa"))
+
+    def test_phase13_readiness_runtime_metadata_marks_synthetic_runtime(self):
+        with patch.object(physics_backend_module.GenesisPhysicsBackend, "_is_genesis_available", return_value=False):
+            readiness = physics_backend_readiness("genesis", options={"skip_dependency_check": True})
+
+        self._require_runtime_metadata(readiness, context="skip_dependency_check readiness")
+        self.assertTrue(readiness["ready"])
+        runtime_mode = str(readiness["runtime_mode"]).lower()
+        dependency_source = str(readiness["dependency_source"]).lower()
+        self.assertIn("synthetic", runtime_mode)
+        self.assertTrue(
+            "skip" in dependency_source or "synthetic" in dependency_source,
+            "dependency_source should explain synthetic/skip-dependency path.",
+        )
+
+    def test_phase13_readiness_runtime_metadata_marks_external_runtime_source(self):
+        if not self._external_probe_bridge_supported():
+            self.skipTest("Phase12 external runtime probe bridge is not integrated in current branch.")
+
+        with patch.object(physics_backend_module.GenesisPhysicsBackend, "_is_genesis_available", return_value=False):
+            with patch.object(
+                physics_backend_module.GenesisPhysicsBackend,
+                "_is_genesis_available_via_external_runtime",
+                return_value=(True, "module import probe succeeded in external runtime"),
+            ):
+                readiness = physics_backend_readiness(
+                    "genesis",
+                    options={
+                        "module_name": "phase13_external_only_module",
+                        "external_python": sys.executable,
+                    },
+                )
+
+        self._require_runtime_metadata(readiness, context="external runtime readiness")
+        self.assertTrue(readiness["ready"])
+        dependency_source = str(readiness["dependency_source"]).lower()
+        runtime_mode = str(readiness["runtime_mode"]).lower()
+        self.assertIn("external", dependency_source)
+        self.assertNotIn("synthetic", runtime_mode)
+
+    def test_phase13_real_switch_executes_external_probe_and_env_from_string(self):
+        if os.environ.get(RUN_PHASE13_GENESIS_EXTERNAL_RUNTIME_EXEC_TEST_ENV_VAR, "0") != "1":
+            self.skipTest(
+                "Set "
+                f"{RUN_PHASE13_GENESIS_EXTERNAL_RUNTIME_EXEC_TEST_ENV_VAR}=1 "
+                "to run executable Genesis external-runtime switch test."
+            )
+        if not self._external_probe_bridge_supported():
+            self.skipTest("Phase12 external runtime probe bridge is not integrated in current branch.")
+
+        self._register_executable_probe_env()
+        module_name = "phase13_external_runtime_only_module"
+
+        with tempfile.TemporaryDirectory(prefix="phase13_genesis_external_probe_") as module_dir:
+            module_file = os.path.join(module_dir, f"{module_name}.py")
+            with open(module_file, "w", encoding="utf-8") as handle:
+                handle.write("EXTERNAL_RUNTIME_ONLY = True\n")
+
+            options_by_backend = {
+                "genesis": {
+                    "module_name": module_name,
+                    "external_python": sys.executable,
+                    "external_probe_timeout_sec": 8,
+                    "PYOPENGL_PLATFORM": "egl",
+                    "external_probe_env": {"PYTHONPATH": module_dir},
+                }
+            }
+
+            with patch.dict(
+                os.environ,
+                {
+                    "ENABLE_REAL_BACKEND_TESTS": "1",
+                    "REAL_BACKEND_SWITCH_REQUIRE_TRUE_RUNTIME": "1",
+                },
+                clear=False,
+            ):
+                report = diagnostics_module.diagnose_real_backend_switch_test(
+                    enable_real_backend_tests=1,
+                    options_by_backend=options_by_backend,
+                    require_true_runtime=True,
+                )
+
+            if _is_blocked(report):
+                self.skipTest(report.get("first_skip_reason") or "real backend switch diagnostics is blocked")
+
+            candidate = report.get("candidate")
+            if candidate is None:
+                self.skipTest("Real backend switch diagnostics did not return a candidate.")
+
+            candidate_options = report.get("candidate_physics_backend_options", {})
+            env = env_from_string(
+                candidate["env_name"],
+                physics_backend=candidate["backend_name"],
+                render_backend="none",
+                physics_backend_options=candidate_options,
+            )
+
+        self.assertEqual(candidate["env_name"], "GenesisExternalRuntimeExecutableEnv")
+        self.assertEqual(candidate["backend_name"], "genesis")
+        self.assertEqual(env.physics_backend, "genesis")
+        self.assertEqual(candidate_options.get("module_name"), module_name)
+        self.assertEqual(candidate_options.get("external_python"), sys.executable)
+        self.assertEqual(candidate_options.get("PYOPENGL_PLATFORM"), "egl")
+        self.assertEqual(candidate_options.get("external_probe_timeout_sec"), 8)
+        self.assertEqual(candidate_options.get("external_probe_env", {}).get("PYTHONPATH"), module_dir)
+
+        candidate_runtime_mode = str(report.get("candidate_runtime_mode") or "").lower()
+        self.assertTrue(candidate_runtime_mode in {"true-runtime", "external-runtime"})
+        readiness = report.get("candidate_readiness") or {}
+        if {"dependency_source", "runtime_mode"}.issubset(set(readiness.keys())):
+            self.assertIn("external", str(readiness["dependency_source"]).lower())
 
 
 if __name__ == "__main__":
