@@ -1,5 +1,6 @@
 import copy
 import importlib
+import os
 from concurrent.futures import ThreadPoolExecutor
 import unittest
 
@@ -8,6 +9,7 @@ from mbrl.environments.backends import (
     ENV_REGISTRY,
     available_env_backends,
     dispatch_render,
+    list_physics_backends,
     load_backend_plugins,
     normalize_plugin_modules,
     register_env_backend,
@@ -168,6 +170,32 @@ class EnvironmentBackendsTestCase(unittest.TestCase):
         with self.assertRaises(ImportError) as error:
             load_backend_plugins(["tests.module_does_not_exist_for_backend_plugin"])
         self.assertIn("Failed to import backend plugin module", str(error.exception))
+
+    def test_real_backend_switch_when_enabled(self):
+        if os.environ.get("ENABLE_REAL_BACKEND_TESTS", "0") != "1":
+            self.skipTest("Set ENABLE_REAL_BACKEND_TESTS=1 to run real non-MuJoCo backend switch tests.")
+
+        implemented_non_mujoco = [
+            name for name, info in list_physics_backends().items() if info["implemented"] and name != "mujoco"
+        ]
+        if not implemented_non_mujoco:
+            self.skipTest("No implemented non-MuJoCo physics backend is registered yet.")
+
+        candidate = None
+        for env_name, env_backends in ENV_REGISTRY.items():
+            for backend_name in implemented_non_mujoco:
+                if backend_name in env_backends:
+                    candidate = (env_name, backend_name)
+                    break
+            if candidate is not None:
+                break
+
+        if candidate is None:
+            self.skipTest("No ENV_REGISTRY entry exists for implemented non-MuJoCo backends.")
+
+        env_name, backend_name = candidate
+        env = env_from_string(env_name, physics_backend=backend_name, render_backend="none")
+        self.assertEqual(env.physics_backend, backend_name)
 
 
 if __name__ == "__main__":
