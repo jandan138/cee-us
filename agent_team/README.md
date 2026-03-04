@@ -44,12 +44,16 @@ agent_team/
     memory_delta_template.md
     thread_registry_template.md
     codex_spawn_prompt_template.md
+  references/
+    wait-and-stuck-policy.md
   scripts/
     codex_multi_agent_preflight.sh
     bootstrap_agents.sh
     init_run.sh
     setup_run_worktrees.sh
     teardown_run_worktrees.sh
+    monitor_subagents.sh
+    restart_stuck_subagent.sh
     check_run_logs.sh
     update_agent_memory.sh
   runs/
@@ -91,6 +95,10 @@ agent_team/
   `AGENT_TEAM_WORKTREE_ROOT=/tmp/agent_team_worktrees/<repo>/<run_id> bash agent_team/scripts/setup_run_worktrees.sh <run_id>`
 - 清理该 run 的 worktrees  
   `bash agent_team/scripts/teardown_run_worktrees.sh <run_id> [--delete-branches]`
+- 巡检子代理心跳（默认慢等待，不设硬超时）  
+  `bash agent_team/scripts/monitor_subagents.sh <run_id> [--interval-min 10] [--stuck-min 45]`
+- 子代理确认卡死后重启同角色线程  
+  `bash agent_team/scripts/restart_stuck_subagent.sh <run_id> <agent_id> <new_thread_id>`
 - 校验 run 完整性（日志 + memory delta + delegation + thread registry + worktree registry）  
   `bash agent_team/scripts/check_run_logs.sh <run_id>`
 - 合并 run 增量记忆到长期 memory  
@@ -106,3 +114,17 @@ agent_team/
 - 任何测试结论都要给出可复现命令或产物路径。
 - 线程与角色必须在 `threads/registry.md` 中一一映射，避免“谁做了什么”不可追溯。
 - 可编辑角色必须在 `worktrees/registry.md` 指定的分支与路径里改代码，避免并行写冲突。
+
+## 等待与卡死策略（重要）
+- 默认策略：**主代理慢慢等，不设硬超时**。子代理慢并不等于失败。
+- 仅在“疑似卡死 -> 人工确认卡死”后才允许重启线程。
+- 心跳建议：每个活跃子代理建议每 10 分钟更新 `last_heartbeat_at`。
+- 巡检建议：主代理周期运行  
+  `bash agent_team/scripts/monitor_subagents.sh <run_id> --interval-min 10 --stuck-min 45`
+- 人工确认卡死时，更新 `threads/registry.md` 该行为：
+  - `status = stuck-confirmed`
+  - `stuck_candidate = confirmed`
+  - `notes` 记录确认原因与时间
+- 处置建议：确认卡死后，默认“重启同角色线程”  
+  `bash agent_team/scripts/restart_stuck_subagent.sh <run_id> <agent_id> <new_thread_id>`
+- 详细规范见：`agent_team/references/wait-and-stuck-policy.md`

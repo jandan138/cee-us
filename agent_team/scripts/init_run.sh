@@ -96,7 +96,7 @@ if [[ ! -f "${THREAD_REGISTRY}" ]]; then
   cp "${TEAM_DIR}/templates/thread_registry_template.md" "${THREAD_REGISTRY}"
   sed -i "s/<run_id>/${RUN_ID}/g" "${THREAD_REGISTRY}"
   for AGENT in "${AGENTS[@]}"; do
-    printf "| %s |  |  |  |  |  |\n" "${AGENT}" >> "${THREAD_REGISTRY}"
+    printf "| %s |  | planned | %s |  |  | 10 | no | 0 |  |\n" "${AGENT}" "${AGENT}" >> "${THREAD_REGISTRY}"
   done
 fi
 

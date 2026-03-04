@@ -51,6 +51,33 @@ bash agent_team/scripts/setup_run_worktrees.sh <run_id>
 
 并在 TUI 里用 `/agent` 查看和切换子线程。
 
+### 第二步半：主 agent 如何“慢慢等”
+这是你最关心的规则：**主 agent 默认慢慢等，不设硬超时**。  
+子代理即使慢，只要还在推进，就继续等待。
+
+建议主 agent 周期巡检：
+
+```bash
+bash agent_team/scripts/monitor_subagents.sh <run_id> --interval-min 10 --stuck-min 45
+```
+
+- `interval-min 10`：建议心跳间隔 10 分钟
+- `stuck-min 45`：超过 45 分钟无心跳会标记为 `stuck-suspected`
+- 注意：`stuck-suspected` 只是告警，不是自动终止
+
+只有人工确认卡死（`stuck-confirmed`）后，才允许重启同角色线程：
+
+```bash
+bash agent_team/scripts/restart_stuck_subagent.sh <run_id> <agent_id> <new_thread_id>
+```
+
+人工确认卡死的最小操作：
+- 打开 `runs/<run_id>/threads/registry.md`
+- 把该 agent 行改为：
+  - `status = stuck-confirmed`
+  - `stuck_candidate = confirmed`
+  - 在 `notes` 写清原因（例如：`manual confirm: no progress for 90m`）
+
 ### 第三步：收尾检查与记忆合并
 
 ```bash
@@ -88,3 +115,7 @@ bash agent_team/scripts/teardown_run_worktrees.sh <run_id> --delete-branches
 运行产生的临时 run 目录（`agent_team/runs/<run_id>/...`）通常不进版本库。  
 本仓库已通过 `.gitignore` 规则默认忽略，只保留 `agent_team/runs/.gitkeep`。
 
+### Q5: 子代理很慢怎么办？
+默认继续等，不要急着终止。  
+先跑 `monitor_subagents.sh` 看是否只是慢、还是疑似卡死。  
+除非人工确认卡死，否则不要重启线程。

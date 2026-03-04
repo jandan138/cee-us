@@ -39,6 +39,21 @@ if [[ ! -f "${THREAD_REGISTRY}" ]]; then
   exit 2
 fi
 
+if ! rg -n --fixed-strings "last_heartbeat_at" "${THREAD_REGISTRY}" >/dev/null 2>&1; then
+  echo "ERROR: thread registry header is outdated, missing last_heartbeat_at"
+  exit 2
+fi
+
+if ! rg -n --fixed-strings "heartbeat_interval_min" "${THREAD_REGISTRY}" >/dev/null 2>&1; then
+  echo "ERROR: thread registry header is outdated, missing heartbeat_interval_min"
+  exit 2
+fi
+
+if ! rg -n --fixed-strings "stuck_candidate" "${THREAD_REGISTRY}" >/dev/null 2>&1; then
+  echo "ERROR: thread registry header is outdated, missing stuck_candidate"
+  exit 2
+fi
+
 if [[ ! -f "${WORKTREE_REGISTRY}" ]]; then
   echo "ERROR: worktree registry not found: ${WORKTREE_REGISTRY}"
   exit 2
@@ -142,6 +157,75 @@ for AGENT in "${AGENTS[@]}"; do
   if ! rg -n --fixed-strings "| ${AGENT} |" "${THREAD_REGISTRY}" >/dev/null 2>&1; then
     echo "INVALID: ${THREAD_REGISTRY} missing row for ${AGENT}"
     FAILED=1
+  fi
+done
+
+for AGENT in "${AGENTS[@]}"; do
+  THREAD_DATA="$(
+    awk -F'|' -v a="${AGENT}" '
+      /^\|/ {
+        agent=$2; status=$4; started=$6; last_hb=$7; interval=$8; stuck=$9; escalation=$10; notes=$11;
+        gsub(/^[ \t]+|[ \t]+$/, "", agent);
+        gsub(/^[ \t]+|[ \t]+$/, "", status);
+        gsub(/^[ \t]+|[ \t]+$/, "", started);
+        gsub(/^[ \t]+|[ \t]+$/, "", last_hb);
+        gsub(/^[ \t]+|[ \t]+$/, "", interval);
+        gsub(/^[ \t]+|[ \t]+$/, "", stuck);
+        gsub(/^[ \t]+|[ \t]+$/, "", escalation);
+        gsub(/^[ \t]+|[ \t]+$/, "", notes);
+        if (agent==a) {
+          print status "\t" started "\t" last_hb "\t" interval "\t" stuck "\t" escalation "\t" notes;
+          exit;
+        }
+      }
+    ' "${THREAD_REGISTRY}"
+  )"
+
+  THREAD_STATUS="$(echo "${THREAD_DATA}" | cut -f1)"
+  THREAD_STARTED="$(echo "${THREAD_DATA}" | cut -f2)"
+  THREAD_LAST_HB="$(echo "${THREAD_DATA}" | cut -f3)"
+  THREAD_INTERVAL="$(echo "${THREAD_DATA}" | cut -f4)"
+  THREAD_STUCK="$(echo "${THREAD_DATA}" | cut -f5)"
+  THREAD_ESCALATION="$(echo "${THREAD_DATA}" | cut -f6)"
+  THREAD_NOTES="$(echo "${THREAD_DATA}" | cut -f7)"
+
+  if [[ -z "${THREAD_STATUS}" ]]; then
+    echo "INVALID: cannot parse thread row for ${AGENT}"
+    FAILED=1
+    continue
+  fi
+
+  if [[ "${THREAD_STATUS}" == "active" || "${THREAD_STATUS}" == "waiting-subagent" ]]; then
+    if [[ -z "${THREAD_LAST_HB}" ]]; then
+      echo "INVALID: ${AGENT} is ${THREAD_STATUS} but last_heartbeat_at is empty"
+      FAILED=1
+    fi
+  fi
+
+  if [[ -n "${THREAD_INTERVAL}" ]] && ! [[ "${THREAD_INTERVAL}" =~ ^[0-9]+$ ]]; then
+    echo "INVALID: ${AGENT} heartbeat_interval_min should be an integer"
+    FAILED=1
+  fi
+
+  if [[ -n "${THREAD_ESCALATION}" ]] && ! [[ "${THREAD_ESCALATION}" =~ ^[0-9]+$ ]]; then
+    echo "INVALID: ${AGENT} escalation_count should be an integer"
+    FAILED=1
+  fi
+
+  if [[ "${THREAD_STUCK}" != "no" && "${THREAD_STUCK}" != "yes-confirm-required" && "${THREAD_STUCK}" != "confirmed" && -n "${THREAD_STUCK}" ]]; then
+    echo "INVALID: ${AGENT} has unsupported stuck_candidate value: ${THREAD_STUCK}"
+    FAILED=1
+  fi
+
+  if [[ "${THREAD_STATUS}" == "stuck-confirmed" ]]; then
+    if [[ "${THREAD_STUCK}" != "confirmed" ]]; then
+      echo "INVALID: ${AGENT} status is stuck-confirmed but stuck_candidate is not confirmed"
+      FAILED=1
+    fi
+    if [[ -z "${THREAD_NOTES}" ]]; then
+      echo "INVALID: ${AGENT} status is stuck-confirmed but notes are empty"
+      FAILED=1
+    fi
   fi
 done
 
