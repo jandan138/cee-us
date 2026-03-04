@@ -1,5 +1,4 @@
 import copy
-import inspect
 import os
 import subprocess
 import unittest
@@ -37,31 +36,30 @@ class GenesisExternalRuntimeBridgeTestCase(unittest.TestCase):
     @staticmethod
     def _external_probe_options():
         probe_payload = {
-            "enabled": True,
             "python_executable": "/opt/genesis-external/bin/python3",
-            "opengl_platform": "egl",
+            "opengl_platform": "osmesa",
             "timeout_seconds": 5,
         }
         return {
-            "external_runtime_probe": dict(probe_payload),
-            "external_probe": dict(probe_payload),
-            "external_genesis_runtime_probe": dict(probe_payload),
-            "external_python_executable": probe_payload["python_executable"],
-            "external_opengl_platform": probe_payload["opengl_platform"],
-            "external_probe_timeout_seconds": probe_payload["timeout_seconds"],
+            "external_python": probe_payload["python_executable"],
+            "PYOPENGL_PLATFORM": probe_payload["opengl_platform"],
+            "external_probe_timeout_sec": probe_payload["timeout_seconds"],
+            "external_probe_env": {"PYOPENGL_PLATFORM": probe_payload["opengl_platform"]},
         }
 
     @staticmethod
     def _external_probe_bridge_supported():
-        prepare_source = inspect.getsource(
-            __import__("mbrl.environments.backends.physics", fromlist=["GenesisPhysicsBackend"]).GenesisPhysicsBackend.prepare_backend
-        ).lower()
-        return "external" in prepare_source and "subprocess" in prepare_source
+        backend_cls = __import__("mbrl.environments.backends.physics", fromlist=["GenesisPhysicsBackend"]).GenesisPhysicsBackend
+        return hasattr(backend_cls, "_is_genesis_available_via_external_runtime")
 
     @staticmethod
     def _external_env_bridge_supported():
-        names = {name.upper() for name in dir(diagnostics_module)}
-        return any("EXTERNAL" in name and "PYTHON" in name for name in names)
+        required_names = {
+            "REAL_SWITCH_TEST_GENESIS_EXTERNAL_PYTHON_ENV_VAR",
+            "REAL_SWITCH_TEST_GENESIS_PROBE_TIMEOUT_SEC_ENV_VAR",
+            "REAL_SWITCH_TEST_GENESIS_PYOPENGL_PLATFORM_ENV_VAR",
+        }
+        return required_names.issubset(set(dir(diagnostics_module)))
 
     def _register_strict_probe_env(self):
         register_env_backend(
@@ -213,11 +211,8 @@ class GenesisExternalRuntimeBridgeTestCase(unittest.TestCase):
             {
                 "REAL_BACKEND_SWITCH_PHYSICS_OPTIONS_JSON": "{}",
                 "REAL_BACKEND_SWITCH_GENESIS_EXTERNAL_PYTHON": external_python,
-                "REAL_BACKEND_SWITCH_EXTERNAL_PYTHON": external_python,
-                "GENESIS_EXTERNAL_PYTHON": external_python,
-                "REAL_BACKEND_SWITCH_GENESIS_OPENGL_PLATFORM": "egl",
-                "REAL_BACKEND_SWITCH_OPENGL_PLATFORM": "egl",
-                "GENESIS_OPENGL_PLATFORM": "egl",
+                "REAL_BACKEND_SWITCH_GENESIS_PYOPENGL_PLATFORM": "osmesa",
+                "REAL_BACKEND_SWITCH_GENESIS_PROBE_TIMEOUT_SEC": "6.5",
             },
             clear=False,
         ):
@@ -226,7 +221,7 @@ class GenesisExternalRuntimeBridgeTestCase(unittest.TestCase):
         genesis_options = config["options_by_backend"].get("genesis", {})
         self.assertTrue(genesis_options)
         self.assertTrue(_contains_value(genesis_options, external_python))
-        self.assertTrue(_contains_value(genesis_options, "egl"))
+        self.assertTrue(_contains_value(genesis_options, "osmesa"))
 
 
 if __name__ == "__main__":
