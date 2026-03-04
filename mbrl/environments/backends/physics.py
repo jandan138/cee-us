@@ -260,6 +260,17 @@ def list_physics_backends():
     return info
 
 
+def _runtime_mode_from_dependency_source(dependency_source):
+    normalized = str(dependency_source or "").strip().lower()
+    if normalized == "synthetic":
+        return "synthetic-runtime"
+    if normalized == "external":
+        return "external-runtime"
+    if normalized in {"local", ""}:
+        return "true-runtime"
+    return "unknown-runtime"
+
+
 def physics_backend_readiness(backend_name, options=None):
     readiness = {
         "backend": backend_name,
@@ -267,6 +278,7 @@ def physics_backend_readiness(backend_name, options=None):
         "error_type": None,
         "reason": "",
         "dependency_source": "unknown",
+        "runtime_mode": "unknown-runtime",
     }
     try:
         backend = physics_backend_from_string(backend_name)
@@ -277,6 +289,7 @@ def physics_backend_readiness(backend_name, options=None):
 
     readiness["backend"] = backend.backend_name
     readiness["dependency_source"] = getattr(backend, "dependency_source", "local")
+    readiness["runtime_mode"] = _runtime_mode_from_dependency_source(readiness["dependency_source"])
     if not bool(getattr(backend, "implemented", False)):
         readiness["error_type"] = "NotImplementedError"
         readiness["reason"] = (
@@ -289,11 +302,13 @@ def physics_backend_readiness(backend_name, options=None):
         backend.prepare_backend(options=backend.options)
     except Exception as error:
         readiness["dependency_source"] = getattr(backend, "dependency_source", readiness["dependency_source"])
+        readiness["runtime_mode"] = _runtime_mode_from_dependency_source(readiness["dependency_source"])
         readiness["error_type"] = type(error).__name__
         readiness["reason"] = str(error)
         return readiness
 
     readiness["dependency_source"] = getattr(backend, "dependency_source", readiness["dependency_source"])
+    readiness["runtime_mode"] = _runtime_mode_from_dependency_source(readiness["dependency_source"])
     readiness["ready"] = True
     return readiness
 
