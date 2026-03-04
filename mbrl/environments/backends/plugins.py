@@ -1,4 +1,8 @@
-from importlib import import_module
+from importlib import import_module, reload
+from threading import Lock
+
+_REGISTERED_PLUGIN_MODULES = set()
+_PLUGIN_REGISTRATION_LOCK = Lock()
 
 
 def normalize_plugin_modules(plugin_modules):
@@ -22,14 +26,28 @@ def normalize_plugin_modules(plugin_modules):
     return normalized
 
 
-def load_backend_plugins(plugin_modules):
+def load_backend_plugins(plugin_modules, *, force_reload=False):
     loaded_modules = []
     for module_name in normalize_plugin_modules(plugin_modules):
-        try:
-            import_module(module_name)
-        except Exception as error:
-            raise ImportError(f"Failed to import backend plugin module '{module_name}'") from error
-        loaded_modules.append(module_name)
+        with _PLUGIN_REGISTRATION_LOCK:
+            if not force_reload and module_name in _REGISTERED_PLUGIN_MODULES:
+                loaded_modules.append(module_name)
+                continue
+
+            try:
+                module = import_module(module_name)
+            except Exception as error:
+                raise ImportError(f"Failed to import backend plugin module '{module_name}'") from error
+
+            if force_reload:
+                module = reload(module)
+
+            register_fn = getattr(module, "register_backends", None)
+            if callable(register_fn):
+                register_fn()
+
+            _REGISTERED_PLUGIN_MODULES.add(module_name)
+            loaded_modules.append(module_name)
     return loaded_modules
 
 
@@ -50,3 +68,8 @@ def load_backend_plugins_from_params(params):
         modules = getattr(params, "backend_plugins", [])
 
     return load_backend_plugins(modules)
+
+
+def reset_loaded_backend_plugins():
+    with _PLUGIN_REGISTRATION_LOCK:
+        _REGISTERED_PLUGIN_MODULES.clear()

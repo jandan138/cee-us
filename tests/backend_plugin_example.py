@@ -29,12 +29,24 @@ class PluginRenderBackend(RenderBackend):
         }
 
 
-register_physics_backend("pluginphysics", PluginPhysicsBackend, aliases=["plugin"], override=False)
-register_render_backend("pluginrender", PluginRenderBackend, aliases=["plugin_renderer"], override=False)
-register_env_backend(
-    "PluginEnv",
-    "pluginphysics",
-    "mbrl.environments.testsupport_dummy_env",
-    "DummyTestEnv",
-    overwrite=False,
-)
+REGISTER_CALL_COUNT = 0
+
+
+def register_backends():
+    global REGISTER_CALL_COUNT
+    REGISTER_CALL_COUNT += 1
+
+    register_physics_backend("pluginphysics", PluginPhysicsBackend, aliases=["plugin"], override=True)
+    register_render_backend("pluginrender", PluginRenderBackend, aliases=["plugin_renderer"], override=True)
+    register_env_backend(
+        "PluginEnv",
+        "pluginphysics",
+        "mbrl.environments.testsupport_dummy_env",
+        "DummyTestEnv",
+        overwrite=True,
+    )
+
+
+def reset_register_call_count():
+    global REGISTER_CALL_COUNT
+    REGISTER_CALL_COUNT = 0

@@ -4,7 +4,7 @@ from .physics import (
     physics_backend_from_string,
     register_physics_backend,
 )
-from .plugins import load_backend_plugins, normalize_plugin_modules
+from .plugins import load_backend_plugins, normalize_plugin_modules, reset_loaded_backend_plugins
 from .render import (
     available_render_backends,
     dispatch_render,
@@ -23,6 +23,7 @@ __all__ = [
     "list_physics_backends",
     "list_render_backends",
     "load_backend_plugins",
+    "reset_loaded_backend_plugins",
     "normalize_plugin_modules",
     "physics_backend_from_string",
     "register_env_backend",
